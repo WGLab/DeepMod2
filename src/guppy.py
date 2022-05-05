@@ -14,7 +14,7 @@ from pathlib import Path
 from .utils import *
 
 def get_bam_info(args):
-    print('%s: Processing BAM File.' %str(datetime.datetime.now()), flush=True)
+    
     chrom, bam_path, fasta_path=args
     bam=pysam.Samfile(bam_path,'rb')
     read_info={}
@@ -43,8 +43,7 @@ def get_bam_info(args):
                             
         except IndexError:
             continue
-                            
-    print('%s: Finished Processing BAM File.' %str(datetime.datetime.now()), flush=True)
+    
     return read_info
 
 

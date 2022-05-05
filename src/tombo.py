@@ -30,7 +30,7 @@ def get_tombo_alignment_info(alignment_attrs):
     return mapped_chrom, mapped_strand, mapped_start, mapped_end
 
 
-def getFeatures(f5_list, params, read_info):
+def getFeatures(f5_list, params):
     base_map={'A':0, 'C':1, 'G':2, 'T':3}
     strand_map={'+':0, '-':1}
     
@@ -57,9 +57,6 @@ def getFeatures(f5_list, params, read_info):
             
             alignment_attrs = f5['Analyses/%s/BaseCalled_template/Alignment' %tombo_group].attrs
             mapped_chrom, mapped_strand, mapped_start, mapped_end = get_tombo_alignment_info(alignment_attrs)
-            
-            if mapped_chrom not in read_info:
-                continue
                 
             read_name=get_attr(f5['Raw/Reads'], 'read_id').decode('utf-8')
             
