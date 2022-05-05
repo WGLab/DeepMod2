@@ -43,7 +43,7 @@ if __name__ == '__main__':
     
     
     
-    parent_parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
+    
     
     
     guppy_parser = main_subparsers.add_parser("detect-guppy", parents=[parent_parser],
@@ -53,6 +53,7 @@ if __name__ == '__main__':
     
     
     guppy_parser.add_argument("--model", help='Name of the model. Default model is "guppy_na12878" but you can provide a path to your own model.',type=str, default='guppy_na12878')
+    guppy_parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
     
     guppy_parser.add_argument("--bam", help='Path to bam file if Guppy basecaller is user. BAM file is not needed with Tombo fast5 files.', type=str, required=True)
     guppy_parser.add_argument("--ref", help='Path to reference file', type=str, required=True)
