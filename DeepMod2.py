@@ -80,13 +80,25 @@ if __name__ == '__main__':
     if len(sys.argv)==1:
         parser.print_help()
         parser.exit()
+        
     
     elif len(sys.argv)==2:
-        match sys.argv[1]:
-            case 'merge':
-                merge_parser.print_help()
-                merge_parser.exit()
+        if sys.argv[1]=='merge':
+            merge_parser.print_help()
+            merge_parser.exit()
         
+        elif sys.argv[1]=='detect-guppy':
+            guppy_parser.print_help()
+            guppy_parser.exit()
+            
+        elif sys.argv[1]=='detect-tombo':
+            tombo_parser.print_help()
+            tombo_parser.exit()
+            
+        else:
+            print('invalid option')
+            sys.exit()
+
     args = parser.parse_args()
     
     
