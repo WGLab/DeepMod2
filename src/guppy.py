@@ -21,6 +21,9 @@ def get_bam_info(args):
     
     fastafile=pysam.FastaFile(fasta_path)
     
+    if chrom not in fastafile.references:
+        return read_info
+    
     ref_seq=fastafile.fetch(chrom)
 
     for pcol in bam.pileup(contig=chrom, flag_filter=0x4|0x100|0x200|0x400|0x800, truncate=True):
