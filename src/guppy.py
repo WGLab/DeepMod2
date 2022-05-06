@@ -50,14 +50,10 @@ def get_bam_info(args):
 def process_bam(params, pool):
     fastafile=pysam.FastaFile(params['fasta_path'])
     
-    print('%s: Processing BAM File.' %str(datetime.datetime.now()))
-    
     bam_info=[x for x in pool.imap_unordered(get_bam_info, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path'])))]
     
     read_info=ChainMap(*bam_info)
-    
-    print('%s: BAM File Processed.' %str(datetime.datetime.now()))
-    
+        
     return read_info
 
 
