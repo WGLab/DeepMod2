@@ -135,8 +135,8 @@ if __name__ == '__main__':
                 chrom_list= args.chrom
 
             else:
-                fastafile=pysam.FastaFile(args.ref)
-                chrom_list=fastafile.references
+                bam_file=pysam.Samfile(args.bam,'rb')
+                chrom_list=bam_file.references
 
             params.update({'bam_path':args.bam, 'fasta_path':args.ref , 'chrom_list':chrom_list, 'guppy_group':args.guppy_group})
 
