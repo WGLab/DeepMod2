@@ -12,64 +12,11 @@ import numpy.lib.recfunctions as rf
 
 from pathlib import Path
 
-from tensorflow import keras
-import tensorflow as tf
     
 from .  import guppy
 from .  import tombo
 
 from .utils import *
-
-model_dict={'guppy_na12878':'models/guppy/test_model', 'tombo_na12878':'models/tombo/test_model'}
-
-def get_model(model):
-    if model in model_dict:
-        dirname = os.path.dirname(__file__)
-        return os.path.join(dirname, model_dict[model])
-        
-    elif os.path.exists(model) and os.path.isdir(model_path):
-        return model
-     
-    else:
-        return None
-    
-def detect(args):
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-        
-    strand_map={0:'+', 1:'-'}
-    
-    f5files, params, read_info, job_number = args
-    
-    threshold=0.5
-    
-    output=os.path.join(params['output'],'intermediate_files', 'part_%d' %job_number)
-    
-    model=keras.models.load_model(get_model(params['model']))
-    
-    with open(output, 'w') as outfile: 
-    
-        for f5_chunk in split_list(f5files, 50):
-            
-            if params['basecaller']=='guppy':
-                pos_list, chr_list, strand_list, read_names_list, features_list = guppy.getFeatures(f5_chunk, params, read_info)
-            
-            else:
-                pos_list, chr_list, strand_list, read_names_list, features_list = tombo.getFeatures(f5_chunk, params)
-                
-            if len(features_list)==0:
-                continue
-            pred_list=model.predict(features_list)
-            
-            for i in range(len(pos_list)):
-                pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
-            outfile.flush()
-            os.fsync(outfile.fileno())
-    
-    return output
 
 def per_read_predict(params):
     
@@ -86,16 +33,23 @@ def per_read_predict(params):
     
     read_info=None
     
-    if params['basecaller']=='guppy':
-        print('%s: Processing BAM File.' %str(datetime.datetime.now()), flush=True)
-        read_info=guppy.process_bam(params, pool)
-        print('%s: Finished Processing BAM File.' %str(datetime.datetime.now()), flush=True)
-    
     job_counter=itertools.count(start=1, step=1)
     
-    print('%s: Starting Per Read Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
-    res=pool.imap_unordered(detect, zip(split_list(f5files, files_per_process), itertools.repeat(params), itertools.repeat(read_info), job_counter))
+    
+    if params['basecaller']=='guppy':
+        print('%s: Processing BAM File.' %str(datetime.datetime.now()), flush=True)
+        
+        read_info=guppy.process_bam(params, pool)
+        
+        print('%s: Finished Processing BAM File.' %str(datetime.datetime.now()), flush=True)
+        print('%s: Starting Per Read Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+        
+        res=pool.imap_unordered(guppy.detect, zip(split_list(f5files, files_per_process), itertools.repeat(params), itertools.repeat(read_info), job_counter))
+        
+    else:
+        print('%s: Starting Per Read Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+        res=pool.imap_unordered(tombo.detect, zip(split_list(f5files, files_per_process), itertools.repeat(params), itertools.repeat(read_info), job_counter))
     
     file_list=[file_name for file_name in res]
     

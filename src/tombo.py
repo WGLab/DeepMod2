@@ -12,6 +12,9 @@ import numpy.lib.recfunctions as rf
 from pathlib import Path
 from .utils import *
 
+from tensorflow import keras
+import tensorflow as tf
+
 def get_tombo_events_summary(events):
     rf_events=rf.structured_to_unstructured(events['norm_mean','norm_stdev','length'])
     
@@ -32,7 +35,7 @@ def get_tombo_alignment_info(alignment_attrs):
 
 def getFeatures(f5_list, params):
     base_map={'A':0, 'C':1, 'G':2, 'T':3}
-    strand_map={'+':0, '-':1}
+    rev_strand_map={'+':0, '-':1}
     
     tombo_group=params['tombo_group']
 
@@ -86,9 +89,44 @@ def getFeatures(f5_list, params):
             features_list.append(mat)
             pos_list.append(pos)
             chr_list.append(mapped_chrom)
-            strand_list.append(strand_map[mapped_strand])
+            strand_list.append(rev_strand_map[mapped_strand])
             read_names_list.append(read_name) 
     
     
     features_list=np.array(features_list)
     return pos_list, chr_list, strand_list, read_names_list, features_list
+
+
+def detect(args):
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+        
+    strand_map={0:'+', 1:'-'}
+    
+    f5files, params, read_info, job_number = args
+    
+    threshold=0.5
+    
+    output=os.path.join(params['output'],'intermediate_files', 'part_%d' %job_number)
+    
+    model=keras.models.load_model(get_model(params['model']))
+    
+    with open(output, 'w') as outfile: 
+    
+        for f5_chunk in split_list(f5files, 50):
+            
+            pos_list, chr_list, strand_list, read_names_list, features_list = getFeatures(f5_chunk, params)
+                
+            if len(features_list)==0:
+                continue
+            pred_list=model.predict(features_list)
+            
+            for i in range(len(pos_list)):
+                pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
+                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
+            outfile.flush()
+            os.fsync(outfile.fileno())
+    
+    return output
