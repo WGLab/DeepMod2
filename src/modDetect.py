@@ -69,9 +69,9 @@ def per_read_predict(params):
     print('%s: Finishing Per Read Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     return output
-
-
+    
 def per_site_detect(read_pred_file_list, params):
+    
     print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     total_files=len(read_pred_file_list)
@@ -89,7 +89,8 @@ def per_site_detect(read_pred_file_list, params):
     
     for read_pred_file in read_pred_file_list:
         with open(read_pred_file,'r') as read_file:
-            for line in read_file.readlines()[1:]:
+            read_file.readline()
+            for line in read_file:
                 read, chrom, pos, strand, score, meth=line.rstrip('\n').split('\t')
 
                 if (chrom, pos, strand) not in per_site_pred:
