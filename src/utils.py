@@ -8,7 +8,7 @@ def get_model(model):
         dirname = os.path.dirname(__file__)
         return os.path.join(dirname, model_dict[model])
         
-    elif os.path.exists(model) and os.path.isdir(model_path):
+    elif os.path.exists(model):
         return model
      
     else:

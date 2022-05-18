@@ -16,7 +16,7 @@ from ont_fast5_api.fast5_interface import get_fast5_file
 
 from tensorflow import keras
 import tensorflow as tf
-
+from numba import jit
 
 def get_bam_info(args):
     
@@ -38,16 +38,16 @@ def get_bam_info(args):
                     if read.alignment.is_reverse==False:
                         if not read.is_del:
                             if read.alignment.qname not in read_info:
-                                read_info[read.alignment.qname]=[(0, chrom)]
-                            read_info[read.alignment.qname].append((pcol.pos+1, read.query_position))
+                                read_info[read.alignment.qname]='+%s\t' %chrom
+                            read_info[read.alignment.qname]+=',%d|%d' %(pcol.pos+1, read.query_position)
         
             elif ref_seq[pcol.pos].upper()=='G' and ref_seq[pcol.pos-1].upper()=='C':
                 for read in pcol.pileups:
                     if read.alignment.is_reverse:
                         if not read.is_del:
                             if read.alignment.qname not in read_info:
-                                read_info[read.alignment.qname]=[(1, chrom)]
-                            read_info[read.alignment.qname].append((pcol.pos+1, read.alignment.query_length-read.query_position-1))
+                                read_info[read.alignment.qname]='-%s\t' %chrom
+                            read_info[read.alignment.qname]+=',%d|%d' %(pcol.pos+1, read.alignment.query_length-read.query_position-1)
                             
         except IndexError:
             continue
@@ -64,6 +64,35 @@ def process_bam(params, pool):
         
     return read_info
 
+@jit(nopython=True)
+def get_events(signal, move, start, stride):
+    rlen=np.sum(move)
+    
+    lengths=np.zeros(rlen)
+    mean=np.zeros(rlen)
+    std=np.zeros(rlen)
+    data=np.zeros((rlen,3))
+    cnt=0
+    
+    prev=start
+    for i in range(move.shape[0]):
+        if move[i]:
+            l=(i+1)*stride+start-prev
+            data[cnt, 2]=l
+            for y in range(l):
+                data[cnt, 0]+=signal[prev+y]
+                
+            data[cnt, 0]=data[cnt, 0]/l
+        
+            for y in range(l):
+                data[cnt, 1]+=np.square(signal[y]-data[cnt, 0])
+
+            data[cnt, 1]=np.sqrt(data[cnt, 1]/l)
+            
+            prev+=l
+            cnt+=1
+            
+    return data, rlen
 
 def get_read_signal(read, guppy_group):
     segment=read.get_analysis_attributes(guppy_group)['segmentation']
@@ -77,17 +106,11 @@ def get_read_signal(read, guppy_group):
     mad=np.median(np.abs(signal-median))
     
     norm_signal=(signal-median)/mad
+    move=read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')
     
-    base_level_data=[]
-    base=0
+    base_level_data, rlen = get_events(norm_signal, move, start, stride)
     
-    prev=start
-    for i,x in enumerate(read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')):
-        if x:        
-            base_level_data.append([prev,(i+1)*stride+start-prev])
-            prev=(i+1)*stride+start
-    
-    return norm_signal, base_level_data
+    return base_level_data, rlen
 
 
 
@@ -121,28 +144,23 @@ def detect(args):
                     read_name=read.read_id
                     
                     try:
-                        read_pos_list=read_info[read_name]
+                        read_info_string=read_info[read_name].split()
+                        mapped_strand, mapped_chrom=read_info_string[0][0], read_info_string[0][1:] 
+                        read_pos_list=read_info_string[1][1:].split(',')
                     except KeyError:
                         continue
 
-                    norm_signal, base_level_data = get_read_signal(read, params['guppy_group'])
-                    
-                    seq_len=len(base_level_data)
+                    base_level_data, seq_len = get_read_signal(read, params['guppy_group'])
 
-                    fq=read.get_analysis_dataset('Basecall_1D_000/BaseCalled_template', 'Fastq').split('\n')[1]
-                    
-                    mapped_strand, mapped_chrom=read_pos_list[0]
+                    fq=read.get_analysis_dataset('%s/BaseCalled_template' %params['guppy_group'], 'Fastq').split('\n')[1]
 
-                    for x in read_pos_list[1:]:
-                        pos, read_pos=x
+                    for x in read_pos_list:
 
+                        x=x.split('|')
+                        pos, read_pos=int(x[0]), int(x[1])
                         if read_pos>window and read_pos<seq_len-window-1:
-                            mat=[]
-                            base_seq=[]
-
-                            for x in range(read_pos-window, read_pos+window+1):
-                                mat.append([np.mean(norm_signal[base_level_data[x][0]:base_level_data[x][0]+base_level_data[x][1]]), np.std(norm_signal[base_level_data[x][0]:base_level_data[x][0]+base_level_data[x][1]]), base_level_data[x][1]])
-                                base_seq.append(base_map[fq[x]])
+                            mat=base_level_data[read_pos-window: read_pos+window+1]
+                            base_seq=[base_map[fq[x]] for x in range(read_pos-window, read_pos+window+1)]
 
                             base_seq=np.eye(4)[base_seq]
                             mat=np.hstack((np.array(mat), base_seq))
@@ -164,7 +182,7 @@ def detect(args):
 
                                 for i in range(len(pos_list)):
                                     pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                                    outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                                    outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
 
                                 features_list, pos_list, chr_list, strand_list, read_names_list = [], [], [], [], []
                                 outfile.flush()
@@ -177,7 +195,7 @@ def detect(args):
 
             for i in range(len(pos_list)):
                 pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
 
             features_list, pos_list, chr_list, strand_list, read_names_list = [], [], [], [], []
             outfile.flush()
