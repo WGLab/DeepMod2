@@ -1,13 +1,11 @@
 from collections import defaultdict, ChainMap
-import ont_fast5_api
-import csv, time, itertools, copy, h5py, time, pysam
 
-import datetime, os, shutil, argparse, sys, random
+import time, itertools, h5py, pysam
+
+import datetime, os, shutil, argparse, sys
 
 import multiprocessing as mp
 import numpy as np
-
-import numpy.lib.recfunctions as rf
 
 from pathlib import Path
 
@@ -136,7 +134,7 @@ def detect(args):
     
     counter=0
     with open(output, 'w') as outfile:
-        features_list, pos_list, chr_list, strand_list, read_names_list = [], [], [], [], []
+        features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
         
         for filename in f5files:
             with get_fast5_file(filename, mode="r") as f5:
@@ -170,6 +168,7 @@ def detect(args):
 
                             features_list.append(mat)
                             pos_list.append(pos)
+                            pos_list_read.append(read_pos)
                             chr_list.append(mapped_chrom)
                             strand_list.append(mapped_strand)
                             read_names_list.append(read_name)     
@@ -181,10 +180,10 @@ def detect(args):
                                 pred_list=model.predict(np.array(features_list))
 
                                 for i in range(len(pos_list)):
-                                    pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                                    outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                                    pos, read_pos, chrom, strand, read_name = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i]
+                                    outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
 
-                                features_list, pos_list, chr_list, strand_list, read_names_list = [], [], [], [], []
+                                features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
                                 outfile.flush()
                                 os.fsync(outfile.fileno())
 
@@ -194,10 +193,10 @@ def detect(args):
             pred_list=model.predict(np.array(features_list))
 
             for i in range(len(pos_list)):
-                pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                pos, read_pos, chrom, strand, read_name = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i]
+                outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
 
-            features_list, pos_list, chr_list, strand_list, read_names_list = [], [], [], [], []
+            features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
             outfile.flush()
             os.fsync(outfile.fileno())       
 

@@ -1,14 +1,12 @@
 from collections import defaultdict, ChainMap
 
-import csv, time, itertools, copy, h5py, time
+import time, itertools
 from tqdm import tqdm
 
-import datetime, os, shutil, argparse, sys, random
+import datetime, os, shutil, argparse, sys
 
 import multiprocessing as mp
 import numpy as np
-
-import numpy.lib.recfunctions as rf
 
 from pathlib import Path
 
@@ -55,7 +53,7 @@ def per_read_predict(params):
     
     output=os.path.join(params['output'], '%s.per_read' %params['file_name'])
     with open(output,'wb') as outfile:
-        outfile.write(b'read_name\tchromosome\tposition\tstrand\tmethylation_score\tmethylation_prediction\n')
+        outfile.write(b'read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmethylation_prediction\n')
         for f in file_list:
             with open(f,'rb') as fd:
                 shutil.copyfileobj(fd, outfile)
@@ -91,7 +89,7 @@ def per_site_detect(read_pred_file_list, params):
         with open(read_pred_file,'r') as read_file:
             read_file.readline()
             for line in read_file:
-                read, chrom, pos, strand, score, meth=line.rstrip('\n').split('\t')
+                read, chrom, pos, read_pos, strand, score, meth=line.rstrip('\n').split('\t')
 
                 if (chrom, pos, strand) not in per_site_pred:
                     per_site_pred[(chrom, pos, strand)]=[0,0]

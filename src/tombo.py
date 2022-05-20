@@ -1,8 +1,6 @@
-from collections import defaultdict, ChainMap
+import time, itertools, h5py, re
 
-import csv, time, itertools, copy, h5py, time, re
-
-import datetime, os, shutil, argparse, sys, random
+import datetime, os, shutil, argparse, sys
 
 import multiprocessing as mp
 import numpy as np
@@ -125,7 +123,7 @@ def detect(args):
             
             for i in range(len(pos_list)):
                 pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                outfile.write('%s\t%s\t%d\tN/A\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
             outfile.flush()
             os.fsync(outfile.fileno())
     

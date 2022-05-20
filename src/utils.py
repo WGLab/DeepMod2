@@ -1,12 +1,24 @@
 from subprocess import PIPE, Popen
 import os, shutil
 
-model_dict={'guppy_na12878':'models/guppy/test_model', 'tombo_na12878':'models/tombo/test_model'}
+model_dict={'guppy_na12878':{'path':'models/guppy/test_model', 
+                             'help':'Model trained on NA12878 Guppy v5 basecalled FAST5 files using positive and negative 5mC methylation control samples from Simpson (Nat Methods 2017).'}, 
+            'tombo_na12878':{'path':'models/tombo/test_model',
+                             'help': 'Model trained on NA12878 Tombo resquiggled FAST5 files (after Guppy v5 basecalling) using positive and negative 5mC methylation control samples from Simpson (Nat Methods 2017).'},
+            'guppy_na12878_native': {'path':'models/guppy/rel3_chr1/model.14-0.25.h5', 'help': 'Model trained on chr1 of NA12878 Guppy v5 basecalled FAST5 files from Nanopore WGS Consortium. Bisulphite methylation calls from two replicates (ENCFF279HCL, ENCFF835NTC) from ECNODE project were used as ground truth for training.'}
+           }
 
+
+def get_model_help():
+    for model in model_dict:
+        print('-'*30)
+        print('Model Name: %s' %model)
+        print('Details: %s\n' %model_dict[model]['help'])
+    
 def get_model(model):
     if model in model_dict:
         dirname = os.path.dirname(__file__)
-        return os.path.join(dirname, model_dict[model])
+        return os.path.join(dirname, model_dict[model]['path'])
         
     elif os.path.exists(model):
         return model

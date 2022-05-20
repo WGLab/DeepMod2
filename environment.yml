@@ -10,3 +10,5 @@ dependencies:
   - tensorflow>=2.2
   - h5py
   - tqdm
+  - numba
+  - ont-fast5-api
