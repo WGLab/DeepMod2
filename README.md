@@ -12,6 +12,6 @@ Please refer to [Installation](https://github.com/WGLab/DeepMod2/blob/main/docs/
 
 Please refer to [Usage](https://github.com/WGLab/DeepMod2/blob/main/docs/Usage.md) for how to use DeepMod2.
 
-## Examples and Reproducibility of our analysis.
+## Examples
 
 Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) detailed instructions on how to run DeepMod2 on both Guppy and Tombo data.

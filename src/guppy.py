@@ -75,19 +75,19 @@ def get_events(signal, move, start, stride):
     prev=start
     for i in range(move.shape[0]):
         if move[i]:
-            l=(i+1)*stride+start-prev
-            data[cnt, 2]=l
-            for y in range(l):
-                data[cnt, 0]+=signal[prev+y]
+            sig_end=(i+1)*stride+start
+            data[cnt, 2]=sig_end-prev
+            for y in range(prev, sig_end):
+                data[cnt, 0]+=signal[y]
                 
-            data[cnt, 0]=data[cnt, 0]/l
+            data[cnt, 0]=data[cnt, 0]/data[cnt, 2]
         
-            for y in range(l):
+            for y in range(prev, sig_end):
                 data[cnt, 1]+=np.square(signal[y]-data[cnt, 0])
 
-            data[cnt, 1]=np.sqrt(data[cnt, 1]/l)
+            data[cnt, 1]=np.sqrt(data[cnt, 1]/data[cnt, 2])
             
-            prev+=l
+            prev=sig_end
             cnt+=1
             
     return data, rlen
