@@ -32,7 +32,7 @@ def get_tombo_alignment_info(alignment_attrs):
 
 
 def getFeatures(f5_list, params):
-    base_map={'A':0, 'C':1, 'G':2, 'T':3}
+    base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     rev_strand_map={'+':0, '-':1}
     
     tombo_group=params['tombo_group']

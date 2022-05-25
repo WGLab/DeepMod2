@@ -127,7 +127,7 @@ def detect(args):
     
     threshold=0.5
     strand_map={0:'+', 1:'-'}
-    base_map={'A':0, 'C':1, 'G':2, 'T':3}
+    base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
     window=params['window']
 
