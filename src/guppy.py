@@ -18,7 +18,7 @@ from numba import jit
 
 def get_bam_info(args):
     
-    chrom, bam_path, fasta_path=args
+    chrom, bam_path, fasta_path, supplementary=args
     bam=pysam.Samfile(bam_path,'rb')
     read_info={}
     
@@ -28,8 +28,13 @@ def get_bam_info(args):
         return read_info
     
     ref_seq=fastafile.fetch(chrom)
-
-    for pcol in bam.pileup(contig=chrom, flag_filter=0x4|0x100|0x200|0x400|0x800, truncate=True):
+    
+    if supplementary:
+        flag=0x4|0x100|0x200|0x400
+    else:
+        flag=0x4|0x100|0x200|0x400|0x800
+        
+    for pcol in bam.pileup(contig=chrom, flag_filter=flag, truncate=True):
         try:
             if ref_seq[pcol.pos].upper()=='C' and ref_seq[pcol.pos+1].upper()=='G':
                 for read in pcol.pileups:
@@ -56,7 +61,7 @@ def get_bam_info(args):
 def process_bam(params, pool):
     fastafile=pysam.FastaFile(params['fasta_path'])
     
-    bam_info=[x for x in pool.imap_unordered(get_bam_info, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path'])))]
+    bam_info=[x for x in pool.imap_unordered(get_bam_info, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path']), itertools.repeat(params['supplementary'])))]
     
     read_info=ChainMap(*bam_info)
         

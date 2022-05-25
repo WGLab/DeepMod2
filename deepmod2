@@ -39,6 +39,9 @@ if __name__ == '__main__':
     
     guppy_required=guppy_parser.add_argument_group("Required Arguments")
     guppy_parser.add_argument("--model", help='Name of the model. Default model is "guppy_na12878" but you can provide a path to your own model. Use --print_models to display all models available.',type=str, default='guppy_na12878')
+    
+    guppy_parser.add_argument("--supplementary", help='Analyse supplementary reads in addition to primary reads, recommended for RNA reads.', default=False, action='store_true')
+    
     guppy_parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
     
     guppy_required.add_argument("--bam", help='Path to bam file if Guppy basecaller is user. BAM file is not needed with Tombo fast5 files.', type=str, required=True)
@@ -129,7 +132,7 @@ if __name__ == '__main__':
                 bam_file=pysam.Samfile(args.bam,'rb')
                 chrom_list=bam_file.references
 
-            params.update({'bam_path':args.bam, 'fasta_path':args.ref , 'chrom_list':chrom_list, 'guppy_group':args.guppy_group})
+            params.update({'bam_path':args.bam, 'fasta_path':args.ref , 'chrom_list':chrom_list, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary})
 
         elif params['basecaller'] == 'tombo':
             params.update({'tombo_group': args.tombo_group})
