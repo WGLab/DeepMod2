@@ -34,7 +34,7 @@ def get_bam_info(args):
     else:
         flag=0x4|0x100|0x200|0x400|0x800
         
-    for pcol in bam.pileup(contig=chrom, flag_filter=flag, truncate=True):
+    for pcol in bam.pileup(contig=chrom, flag_filter=flag, truncate=True, min_base_quality = 0):
         try:
             if ref_seq[pcol.pos].upper()=='C' and ref_seq[pcol.pos+1].upper()=='G':
                 for read in pcol.pileups:
