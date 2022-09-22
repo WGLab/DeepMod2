@@ -38,13 +38,17 @@ def getFeatures(f5_list, params):
     tombo_group=params['tombo_group']
 
     window=params['window']
-
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
+    
     features_list=[]
     pos_list=[]
     chr_list=[]
     label_list=[]
     strand_list=[]
     read_names_list=[]
+    mean_qscore_list=[]
+    sequence_length_list=[]
     
     matcher=re.compile('CG')
 
@@ -58,7 +62,14 @@ def getFeatures(f5_list, params):
             
             alignment_attrs = f5['Analyses/%s/BaseCalled_template/Alignment' %tombo_group].attrs
             mapped_chrom, mapped_strand, mapped_start, mapped_end = get_tombo_alignment_info(alignment_attrs)
-                
+            basecall_group=f5['Analyses/%s' %tombo_group].attrs['basecall_group']
+            basecall_group_attrs=f5['/Analyses/%s/Summary/basecall_1d_template' %basecall_group].attrs
+            mean_qscore=float(basecall_group_attrs['mean_qscore'])
+            sequence_length=int(basecall_group_attrs['sequence_length'])
+            
+            if mean_qscore<qscore_cutoff or sequence_length< length_cutoff:
+                continue
+            
             read_name=get_attr(f5['Raw/Reads'], 'read_id').decode('utf-8')
             
             events = f5['Analyses/%s/BaseCalled_template/Events' %tombo_group]
@@ -89,10 +100,12 @@ def getFeatures(f5_list, params):
             chr_list.append(mapped_chrom)
             strand_list.append(rev_strand_map[mapped_strand])
             read_names_list.append(read_name) 
-    
+            mean_qscore_list.append(mean_qscore)
+            sequence_length_list.append(sequence_length)
     
     features_list=np.array(features_list)
-    return pos_list, chr_list, strand_list, read_names_list, features_list
+
+    return pos_list, chr_list, strand_list, read_names_list, features_list, mean_qscore_list, sequence_length_list
 
 
 def detect(args):
@@ -115,15 +128,18 @@ def detect(args):
     
         for f5_chunk in split_list(f5files, 50):
             
-            pos_list, chr_list, strand_list, read_names_list, features_list = getFeatures(f5_chunk, params)
+            pos_list, chr_list, strand_list, read_names_list, features_list, mean_qscore_list, sequence_length_list = getFeatures(f5_chunk, params)
                 
             if len(features_list)==0:
                 continue
+            
+            features_list[:,:,2]=features_list[:,:,2]/np.sum(features_list[:,:,2],axis=1)[:, np.newaxis]
+
             pred_list=model.predict(features_list)
             
             for i in range(len(pos_list)):
-                pos, chrom, strand, read_name = pos_list[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\tN/A\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                pos, chrom, strand, read_name, mean_qscore, sequence_length  = pos_list[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
+                outfile.write('%s\t%s\t%d\tN/A\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
             outfile.flush()
             os.fsync(outfile.fileno())
     

@@ -22,8 +22,11 @@ def per_read_predict(params):
     temp_folder=os.path.join(params['output'],'intermediate_files')
     os.makedirs(temp_folder, exist_ok=True)
     
-    
-    f5files = list(Path(params['fast5']).rglob("*.fast5"))
+    if os.path.isfile(params['fast5']):
+        with open(params['fast5'],'r') as file_path_list:
+            f5files=file_path_list.read().splitlines()
+    else:    
+        f5files = list(Path(params['fast5']).rglob("*.fast5"))
     files_per_process=len(f5files)//params['threads'] + 1
     print('%s: Number of files: %d\n' %(str(datetime.datetime.now()), len(f5files)), flush=True)
     
@@ -38,6 +41,10 @@ def per_read_predict(params):
     if params['basecaller']=='guppy':
         print('%s: Processing BAM File.' %str(datetime.datetime.now()), flush=True)
         
+        '''if params['mod']=='m6a':
+            
+            motif_info=guppy.process_motifs(params, pool)
+        '''
         read_info=guppy.process_bam(params, pool)
         
         print('%s: Finished Processing BAM File.' %str(datetime.datetime.now()), flush=True)
@@ -53,13 +60,13 @@ def per_read_predict(params):
     
     output=os.path.join(params['output'], '%s.per_read' %params['file_name'])
     with open(output,'wb') as outfile:
-        outfile.write(b'read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmethylation_prediction\n')
+        outfile.write(b'read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmethylation_prediction\tmean_read_qscore\tread_length\n')
         for f in file_list:
             with open(f,'rb') as fd:
                 shutil.copyfileobj(fd, outfile)
-            #os.remove(f)
+            os.remove(f)
     
-    #shutil.rmtree(temp_folder)
+    shutil.rmtree(temp_folder)
     
     pool.close()
     pool.join()
@@ -69,6 +76,8 @@ def per_read_predict(params):
     return output
     
 def per_site_detect(read_pred_file_list, params):
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
     
     print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
@@ -88,8 +97,13 @@ def per_site_detect(read_pred_file_list, params):
         with open(read_pred_file,'r') as read_file:
             read_file.readline()
             for line in read_file:
-                read, chrom, pos, read_pos, strand, score, meth=line.rstrip('\n').split('\t')
-
+                '''read, chrom, pos, read_pos, strand, score, meth, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
+                
+                if float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
+                    continue
+                '''
+                read, chrom, pos, read_pos, strand, score, meth = line.rstrip('\n').split('\t')
+                
                 if (chrom, pos, strand) not in per_site_pred:
                     per_site_pred[(chrom, pos, strand)]=[0,0,0]
 

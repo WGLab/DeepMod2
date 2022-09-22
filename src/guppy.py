@@ -57,7 +57,15 @@ def get_bam_info(args):
     
     return read_info
 
-
+def process_motifs(params, pool):
+    fastafile=pysam.FastaFile(params['fasta_path'])
+    
+    motif_info=[x for x in pool.imap_unordered(get_motif_pos, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path']), itertools.repeat(params['supplementary'])))]
+    
+    read_info=ChainMap(*bam_info)
+        
+    return read_info
+    
 def process_bam(params, pool):
     fastafile=pysam.FastaFile(params['fasta_path'])
     
@@ -102,6 +110,8 @@ def get_read_signal(read, guppy_group):
     
     start=read.get_analysis_attributes('%s/Summary/segmentation' %segment)['first_sample_template']
     stride=read.get_summary_data(guppy_group)['basecall_1d_template']['block_stride']
+    mean_qscore=read.get_summary_data(guppy_group)['basecall_1d_template']['mean_qscore']
+    sequence_length=read.get_summary_data(guppy_group)['basecall_1d_template']['sequence_length']
     
     signal=read.get_raw_data()
     
@@ -113,7 +123,7 @@ def get_read_signal(read, guppy_group):
     
     base_level_data, rlen = get_events(norm_signal, move, start, stride)
     
-    return base_level_data, rlen
+    return base_level_data, rlen, mean_qscore, sequence_length
 
 
 
@@ -135,11 +145,12 @@ def detect(args):
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
     window=params['window']
-
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
     
     counter=0
     with open(output, 'w') as outfile:
-        features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
+        features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list  = [], [], [], [], [], [], [], []
         
         for filename in f5files:
             with get_fast5_file(filename, mode="r") as f5:
@@ -153,8 +164,11 @@ def detect(args):
                     except KeyError:
                         continue
 
-                    base_level_data, seq_len = get_read_signal(read, params['guppy_group'])
-
+                    base_level_data, seq_len, mean_qscore, sequence_length = get_read_signal(read, params['guppy_group'])
+                    
+                    if mean_qscore<qscore_cutoff or sequence_length<length_cutoff:
+                        continue
+                
                     fq=read.get_analysis_dataset('%s/BaseCalled_template' %params['guppy_group'], 'Fastq').split('\n')[1]
 
                     for x in read_pos_list:
@@ -177,7 +191,8 @@ def detect(args):
                             chr_list.append(mapped_chrom)
                             strand_list.append(mapped_strand)
                             read_names_list.append(read_name)     
-
+                            mean_qscore_list.append(mean_qscore)
+                            sequence_length_list.append(sequence_length)
                             counter+=1
 
                             if counter==1000:
@@ -185,10 +200,10 @@ def detect(args):
                                 pred_list=model.predict(np.array(features_list))
 
                                 for i in range(len(pos_list)):
-                                    pos, read_pos, chrom, strand, read_name = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i]
-                                    outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                                    pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
+                                    outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
 
-                                features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
+                                features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
                                 outfile.flush()
                                 os.fsync(outfile.fileno())
 
@@ -198,10 +213,11 @@ def detect(args):
             pred_list=model.predict(np.array(features_list))
 
             for i in range(len(pos_list)):
-                pos, read_pos, chrom, strand, read_name = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i]
-                outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0))
+                pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
+                outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
 
-            features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list = [], [], [], [], [], []
+            features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
+            
             outfile.flush()
             os.fsync(outfile.fileno())       
 

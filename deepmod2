@@ -23,6 +23,8 @@ if __name__ == '__main__':
     grand_parent_parser.add_argument("--file_name", help='Name of the output file',type=str, default='output')
     grand_parent_parser.add_argument("--output", help= 'Path to folder where intermediate and final files will be stored, default is current working directory', type=str)
     grand_parent_parser.add_argument("--threads", help='Number of processors to use',type=int, default=1)
+    grand_parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=5)
+    grand_parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=500)
     
     
     
@@ -116,13 +118,13 @@ if __name__ == '__main__':
                 read_pred_file_list=[x.rstrip('\n') for x in file_list.readlines()]
         
         from src import modDetect
-        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads}
+        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
         
     else:
         
         basecaller='guppy' if args.option=='detect-guppy' else 'tombo'
-        params={'fast5':args.fast5, 'output':args.output, 'threads':args.threads, 'file_name':args.file_name, 'window':10, 'model':args.model, 'basecaller':basecaller, 'skip_per_site':args.skip_per_site}
+        params={'fast5':args.fast5, 'output':args.output, 'threads':args.threads, 'file_name':args.file_name, 'window':10, 'model':args.model, 'basecaller':basecaller, 'skip_per_site':args.skip_per_site, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         
         if params['basecaller'] == 'guppy':
             if args.chrom:
