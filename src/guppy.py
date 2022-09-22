@@ -82,23 +82,35 @@ def get_events(signal, move, start, stride):
     lengths=np.zeros(rlen)
     mean=np.zeros(rlen)
     std=np.zeros(rlen)
-    data=np.zeros((rlen,3))
+    data=np.zeros((rlen,9))
     cnt=0
     
     prev=start
     for i in range(move.shape[0]):
         if move[i]:
             sig_end=(i+1)*stride+start
-            data[cnt, 2]=sig_end-prev
+            sig_len=sig_end-prev
+            data[cnt, 8]=sig_len
+            data[cnt, 4]=np.median(signal[prev:sig_end])
+            data[cnt, 5]=np.median(np.abs(signal[prev:sig_end]-data[cnt, 4]))
+            
             for y in range(prev, sig_end):
-                data[cnt, 0]+=signal[y]
+                data[cnt, 6]+=signal[y]
                 
-            data[cnt, 0]=data[cnt, 0]/data[cnt, 2]
+            data[cnt, 6]=data[cnt, 6]/data[cnt, 8]
         
             for y in range(prev, sig_end):
-                data[cnt, 1]+=np.square(signal[y]-data[cnt, 0])
+                data[cnt, 7]+=np.square(signal[y]-data[cnt, 6])
 
-            data[cnt, 1]=np.sqrt(data[cnt, 1]/data[cnt, 2])
+            data[cnt, 7]=np.sqrt(data[cnt, 7]/data[cnt, 8])
+            
+            
+            for i in range(4):
+                tmp_cnt=0
+                for t in range(i*sig_len//4,min(sig_len, (i+1)*sig_len//4)):
+                    data[cnt, i]+=signal[t+prev]
+                    tmp_cnt+=1
+                data[cnt, i]=data[cnt, i]/tmp_cnt
             
             prev=sig_end
             cnt+=1
@@ -169,7 +181,9 @@ def detect(args):
                     if mean_qscore<qscore_cutoff or sequence_length<length_cutoff:
                         continue
                 
-                    fq=read.get_analysis_dataset('%s/BaseCalled_template' %params['guppy_group'], 'Fastq').split('\n')[1]
+                    read_fastq_record=read.get_analysis_dataset('%s/BaseCalled_template' %params['guppy_group'], 'Fastq').split('\n')
+                    fq=read_fastq_record[1]
+                    qual=read_fastq_record[3]
 
                     for x in read_pos_list:
 
@@ -178,11 +192,11 @@ def detect(args):
                         if read_pos>window and read_pos<seq_len-window-1:
                             mat=base_level_data[read_pos-window: read_pos+window+1]
                             base_seq=[base_map[fq[x]] for x in range(read_pos-window, read_pos+window+1)]
-
+                            base_qual=10.0**(-np.array([ord(q)-33 for q in qual[read_pos-window : read_pos+window+1]])/10)[:,np.newaxis]
                             base_seq=np.eye(4)[base_seq]
-                            mat=np.hstack((np.array(mat), base_seq))
+                            mat=np.hstack((np.array(mat), base_qual, base_seq))
 
-                            if np.size(mat)!=21*7:  
+                            if np.size(mat)!=21*14:  
                                 continue
 
                             features_list.append(mat)
@@ -197,7 +211,9 @@ def detect(args):
 
                             if counter==1000:
                                 counter=0
-                                pred_list=model.predict(np.array(features_list))
+                                features_list=np.array(features_list)
+                                features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
+                                pred_list=model.predict(features_list)
 
                                 for i in range(len(pos_list)):
                                     pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
@@ -210,7 +226,9 @@ def detect(args):
                                 
         if counter>0:
 
-            pred_list=model.predict(np.array(features_list))
+            features_list=np.array(features_list)
+            features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
+            pred_list=model.predict(features_list)
 
             for i in range(len(pos_list)):
                 pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
