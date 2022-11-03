@@ -40,7 +40,7 @@ if __name__ == '__main__':
                                       help="Call methylation from Guppy FAST5 files",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     guppy_required=guppy_parser.add_argument_group("Required Arguments")
-    guppy_parser.add_argument("--model", help='Name of the model. Default model is "guppy_na12878" but you can provide a path to your own model. Use --print_models to display all models available.',type=str, default='guppy_na12878')
+    guppy_parser.add_argument("--model", help='Name of the model. Default model is "guppy_R9.4.1" meant to be used for R9.4.1 flowcell reads, but you can provide a path to your own model. Use --print_models to display all models available. Use "guppy_R10.4" model for R10.4 flowcell reads.',type=str, default='guppy_R9.4.1')
     
     guppy_parser.add_argument("--supplementary", help='Analyse supplementary reads in addition to primary reads, recommended for RNA reads.', default=False, action='store_true')
     
@@ -62,7 +62,7 @@ if __name__ == '__main__':
     tombo_required=tombo_parser.add_argument_group("Required Arguments")
     tombo_required.add_argument("--fast5", help='Path to folder containing tombo requiggle Fast5 files. Fast5 files will be recusrviely searched', type=str, required=True)
     tombo_parser.add_argument("--tombo_group", help='Name of the tombo group',type=str, default='RawGenomeCorrected_000')
-    tombo_parser.add_argument("--model", help='Name of the model. Default model is "tombo_na12878" but you can provide a path to your own model. Use --print_models to display all models available.',type=str, default='tombo_na12878')
+    tombo_parser.add_argument("--model", help='Name of the model. Default model is "tombo_R9.4.1" meant to be used for R9.4.1 flowcell reads, but you can provide a path to your own model. Use --print_models to display all models available.',type=str, default='tombo_R9.4.1')
     
     
     merge_parser = main_subparsers.add_parser("merge", parents=[grand_parent_parser],

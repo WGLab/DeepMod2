@@ -173,11 +173,11 @@ def detect(args):
                         read_info_string=read_info[read_name].split()
                         mapped_strand, mapped_chrom=read_info_string[0][0], read_info_string[0][1:] 
                         read_pos_list=read_info_string[1][1:].split(',')
+                        base_level_data, seq_len, mean_qscore, sequence_length = get_read_signal(read, params['guppy_group'])
+
                     except KeyError:
                         continue
-
-                    base_level_data, seq_len, mean_qscore, sequence_length = get_read_signal(read, params['guppy_group'])
-                    
+                   
                     if mean_qscore<qscore_cutoff or sequence_length<length_cutoff:
                         continue
                 

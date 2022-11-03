@@ -97,12 +97,12 @@ def per_site_detect(read_pred_file_list, params):
         with open(read_pred_file,'r') as read_file:
             read_file.readline()
             for line in read_file:
-                '''read, chrom, pos, read_pos, strand, score, meth, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
+                read, chrom, pos, read_pos, strand, score, meth, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
                 
                 if float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
                     continue
-                '''
-                read, chrom, pos, read_pos, strand, score, meth = line.rstrip('\n').split('\t')
+                
+                #read, chrom, pos, read_pos, strand, score, meth = line.rstrip('\n').split('\t')
                 
                 if (chrom, pos, strand) not in per_site_pred:
                     per_site_pred[(chrom, pos, strand)]=[0,0,0]
