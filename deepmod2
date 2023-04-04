@@ -73,6 +73,13 @@ if __name__ == '__main__':
     merge_parser.add_argument("--inputs",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --inputs or --list argument, but not both.')
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)
     
+    annotate_parser = main_subparsers.add_parser("annotate", parents=[grand_parent_parser],
+                                      add_help=True,
+                                      description="Annotate BAM file with per-read calls",
+                                      help="Annotate BAM file with per-read calls",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    annotate_parser.add_argument("--bam", help='Path to bam file  used in detect-guppy command.', type=str, required=True)
+    annotate_parser.add_argument("--per_read_file", help='Path to per-read calls pdocued by detect-guppy command.', type=str, required=True)
+    
     if len(sys.argv)==1:
         parser.print_help()
         parser.exit()
@@ -82,6 +89,10 @@ if __name__ == '__main__':
         if sys.argv[1]=='merge':
             merge_parser.print_help()
             merge_parser.exit()
+            
+        elif sys.argv[1]=='annotate':
+            annotate_parser.print_help()
+            annotate_parser.exit()
         
         elif sys.argv[1]=='detect-guppy':
             guppy_parser.print_help()
@@ -120,6 +131,11 @@ if __name__ == '__main__':
         from src import modDetect
         params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
+        
+    elif args.option=='annotate':
+        from src import modDetect
+        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'bam':args.bam, 'per_read':args.per_read_file}
+        site_pred_file=modDetect.annotate(params)
         
     else:
         

@@ -19,7 +19,7 @@ from numba import jit
 def get_bam_info(args):
     
     chrom, bam_path, fasta_path, supplementary=args
-    bam=pysam.Samfile(bam_path,'rb')
+    bam=pysam.AlignmentFile(bam_path,'rb')
     read_info={}
     
     fastafile=pysam.FastaFile(fasta_path)
@@ -77,44 +77,30 @@ def process_bam(params, pool):
 
 @jit(nopython=True)
 def get_events(signal, move, start, stride):
+    move_len=len(move)
+    move_index=np.append(np.where(move)[0],[move_len])
     rlen=np.sum(move)
     
-    lengths=np.zeros(rlen)
-    mean=np.zeros(rlen)
-    std=np.zeros(rlen)
     data=np.zeros((rlen,9))
-    cnt=0
     
-    prev=start
-    for i in range(move.shape[0]):
-        if move[i]:
-            sig_end=(i+1)*stride+start
-            sig_len=sig_end-prev
-            data[cnt, 8]=sig_len
-            data[cnt, 4]=np.median(signal[prev:sig_end])
-            data[cnt, 5]=np.median(np.abs(signal[prev:sig_end]-data[cnt, 4]))
-            
-            for y in range(prev, sig_end):
-                data[cnt, 6]+=signal[y]
-                
-            data[cnt, 6]=data[cnt, 6]/data[cnt, 8]
+    for i in range(len(move_index)-1):
+        prev=move_index[i]*stride+start
+        sig_end=move_index[i+1]*stride+start
         
-            for y in range(prev, sig_end):
-                data[cnt, 7]+=np.square(signal[y]-data[cnt, 6])
+        sig_len=sig_end-prev
+        data[i, 8]=sig_len
+        data[i, 4]=np.median(signal[prev:sig_end])
+        data[i, 5]=np.median(np.abs(signal[prev:sig_end]-data[i, 4]))
+        data[i, 6]=np.mean(signal[prev:sig_end])
+        data[i, 7]=np.std(signal[prev:sig_end])
+        
+        for j in range(4):
+            tmp_cnt=0
+            for t in range(j*sig_len//4,min(sig_len, (j+1)*sig_len//4)):
+                data[i, j]+=signal[t+prev]
+                tmp_cnt+=1
+            data[i, j]=data[i, j]/tmp_cnt
 
-            data[cnt, 7]=np.sqrt(data[cnt, 7]/data[cnt, 8])
-            
-            
-            for i in range(4):
-                tmp_cnt=0
-                for t in range(i*sig_len//4,min(sig_len, (i+1)*sig_len//4)):
-                    data[cnt, i]+=signal[t+prev]
-                    tmp_cnt+=1
-                data[cnt, i]=data[cnt, i]/tmp_cnt
-            
-            prev=sig_end
-            cnt+=1
-            
     return data, rlen
 
 def get_read_signal(read, guppy_group):
@@ -189,7 +175,7 @@ def detect(args):
 
                         x=x.split('|')
                         pos, read_pos=int(x[0]), int(x[1])
-                        if read_pos>window and read_pos<seq_len-window-1:
+                        if read_pos>window and read_pos<sequence_length-window-1:
                             mat=base_level_data[read_pos-window: read_pos+window+1]
                             base_seq=[base_map[fq[x]] for x in range(read_pos-window, read_pos+window+1)]
                             base_qual=10.0**(-np.array([ord(q)-33 for q in qual[read_pos-window : read_pos+window+1]])/10)[:,np.newaxis]
@@ -213,22 +199,23 @@ def detect(args):
                                 counter=0
                                 features_list=np.array(features_list)
                                 features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
-                                pred_list=model.predict(features_list)
+                                pred_list=model.predict(features_list, verbose=0)
 
                                 for i in range(len(pos_list)):
                                     pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
                                     outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
 
                                 features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
+                                
                                 outfile.flush()
                                 os.fsync(outfile.fileno())
-
+                                
                                 
         if counter>0:
 
             features_list=np.array(features_list)
             features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
-            pred_list=model.predict(features_list)
+            pred_list=model.predict(features_list, verbose=0)
 
             for i in range(len(pos_list)):
                 pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
@@ -237,7 +224,6 @@ def detect(args):
             features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
             
             outfile.flush()
-            os.fsync(outfile.fileno())       
-
+            os.fsync(outfile.fileno())
         
     return output

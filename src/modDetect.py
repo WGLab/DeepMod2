@@ -3,7 +3,7 @@ from collections import defaultdict, ChainMap
 import time, itertools
 from tqdm import tqdm
 
-import datetime, os, shutil, argparse, sys
+import datetime, os, shutil, argparse, sys, re, array
 
 import multiprocessing as mp
 import numpy as np
@@ -126,3 +126,50 @@ def per_site_detect(read_pred_file_list, params):
     print('%s: Finished Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     return output
+
+def annotate(params):
+    input_bam, per_read=params['bam'], params['per_read']
+    output_bam=os.path.join(params['output'], params['file_name']+'.bam')
+    
+    per_read_stats=get_per_read_stats(per_read)
+    bam_file=pysam.AlignmentFile(input_bam,'rb')
+    header=bam_file.header
+    with pysam.AlignmentFile(output_bam, "wb", header=header) as outf:
+        for read in bam_file.fetch(until_eof=True):
+            if read.flag & 3844==0:
+                try:
+                    cpg_stats=per_read_stats[read.qname]
+                except KeyError:
+                    outf.write(read)
+                    continue
+                prev=-1
+                ML=array.array('B')
+                MM=[]
+                if not read.is_reverse:
+                    seq=read.seq
+                    c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C',seq))}
+                    
+                    for cpg, qual in zip(cpg_stats[0], cpg_stats[1]):
+                        if seq[cpg]=='C':
+                            ML.append(qual)
+                            MM.append(str(c_id[cpg]-prev-1))
+                            prev=c_id[cpg]
+                else:
+                    seq=revcomp(read.seq)
+                    c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C',seq))}
+                    prev=-1
+                    ML=array.array('B')
+                    MM=[]
+                    for cpg, qual in zip(cpg_stats[0][::-1], cpg_stats[1][::-1]):
+                        if seq[cpg]=='C':
+                            ML.append(qual)
+                            MM.append(str(c_id[cpg]-prev-1))
+                            prev=c_id[cpg]
+                if len(ML)>0:
+                        MM='C+m?,'+','.join(MM)+';'
+                        read.set_tag('MM',MM,value_type='Z')
+                        read.set_tag('ML',ML)
+                        
+ 
+            outf.write(read)
+    pysam.index(output_bam);
