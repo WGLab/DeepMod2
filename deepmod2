@@ -73,6 +73,10 @@ if __name__ == '__main__':
     merge_parser.add_argument("--inputs",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --inputs or --list argument, but not both.')
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)
     
+    merge_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
+
+    merge_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
+    
     annotate_parser = main_subparsers.add_parser("annotate", parents=[grand_parent_parser],
                                       add_help=True,
                                       description="Annotate BAM file with per-read calls",
@@ -129,7 +133,7 @@ if __name__ == '__main__':
                 read_pred_file_list=[x.rstrip('\n') for x in file_list.readlines()]
         
         from src import modDetect
-        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
+        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t}
         site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
         
     elif args.option=='annotate':

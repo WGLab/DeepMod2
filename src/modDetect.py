@@ -79,6 +79,9 @@ def per_site_detect(read_pred_file_list, params):
     qscore_cutoff=params['qscore_cutoff']
     length_cutoff=params['length_cutoff']
     
+    mod_t=params['mod_t']
+    unmod_t=params['unmod_t']
+    
     print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     total_files=len(read_pred_file_list)
@@ -98,17 +101,24 @@ def per_site_detect(read_pred_file_list, params):
             read_file.readline()
             for line in read_file:
                 read, chrom, pos, read_pos, strand, score, meth, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
-                
+                score=float(score)
+
                 if float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
                     continue
                 
                 #read, chrom, pos, read_pos, strand, score, meth = line.rstrip('\n').split('\t')
                 
                 if (chrom, pos, strand) not in per_site_pred:
+                    # unmod, mod, score
                     per_site_pred[(chrom, pos, strand)]=[0,0,0]
+                
+                if score>=mod_t:
+                    per_site_pred[(chrom, pos, strand)][1]+=1
+                    per_site_pred[(chrom, pos, strand)][2]+=float(score)
 
-                per_site_pred[(chrom, pos, strand)][int(meth)]+=1
-                per_site_pred[(chrom, pos, strand)][2]+=float(score)
+                elif score<unmod_t:
+                    per_site_pred[(chrom, pos, strand)][0]+=1
+                    per_site_pred[(chrom, pos, strand)][2]+=score
         
         pbar.update(1)
         
@@ -120,8 +130,9 @@ def per_site_detect(read_pred_file_list, params):
         outfile.write('chromosome\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
         for x,y in per_site_pred.items():
             tot_cov=y[0]+y[1]
-            p=y[2]/tot_cov
-            outfile.write('%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+            if tot_cov>0:
+                p=y[2]/tot_cov
+                outfile.write('%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
     
     print('%s: Finished Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
