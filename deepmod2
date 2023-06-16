@@ -20,38 +20,37 @@ if __name__ == '__main__':
     main_subparsers = parser.add_subparsers(title="Options", dest="option")
     
     grand_parent_parser = argparse.ArgumentParser(add_help=False,)
-    grand_parent_parser.add_argument("--file_name", help='Name of the output file',type=str, default='output')
+    grand_parent_parser.add_argument("--prefix", help='Prefix for the output files',type=str, default='output')
     grand_parent_parser.add_argument("--output", help= 'Path to folder where intermediate and final files will be stored, default is current working directory', type=str)
     grand_parent_parser.add_argument("--threads", help='Number of processors to use',type=int, default=1)
     grand_parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=5)
     grand_parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=500)
     
     
-    
     parent_parser = argparse.ArgumentParser(add_help=False, parents=[grand_parent_parser])
-    
-    
-    
     parent_parser.add_argument("--skip_per_site", help='Skip per site detection and stop after per-read methylation calling.' ,default=False, action='store_true')
     
     guppy_parser = main_subparsers.add_parser("detect-guppy", parents=[parent_parser],
                                       add_help=True,
                                       description="Guppy basecaller options",
-                                      help="Call methylation from Guppy FAST5 files",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+                                      help="Call methylation from Guppy or Dorado basecalled FAST5/POD5 files using move tables for signal alignment.",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     guppy_required=guppy_parser.add_argument_group("Required Arguments")
     guppy_parser.add_argument("--model", help='Name of the model. Default model is "guppy_R9.4.1" meant to be used for R9.4.1 flowcell reads, but you can provide a path to your own model. Use --print_models to display all models available. Use "guppy_R10.4.1" model for R10.4.1 flowcell reads.',type=str, default='guppy_R9.4.1')
     
     guppy_parser.add_argument("--supplementary", help='Analyse supplementary reads in addition to primary reads, recommended for RNA reads.', default=False, action='store_true')
     
-    guppy_parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
+    guppy_required.add_argument("--bam", help='Path to aligned or unaligned BAM file. It is ideal to have move table in BAM file but move table from FAST5 fies can also be used. Aligned BAM file is required for reference anchored methylation calls, otherwise only the motif loci on reads will be called.', type=str, required=True)
     
-    guppy_required.add_argument("--bam", help='Path to bam file if Guppy basecaller is user. BAM file is not needed with Tombo fast5 files.', type=str, required=True)
-    guppy_required.add_argument("--ref", help='Path to reference file', type=str, required=True)
-    guppy_required.add_argument("--fast5", help='Path to folder containing tombo requiggle Fast5 files. Fast5 files will be recusrviely searched', type=str, required=True)
+    guppy_required.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
+    
+    guppy_parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
+    
+    guppy_required.add_argument("--input", help='Path to POD5/FAST5 file or folder containing POD5/FAST5 files. If folder provided, then POD5/FAST5 files will be recusrviely searched', type=str, required=True)
     
     guppy_parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
     
+    guppy_parser.add_argument("--fast5_move", help='Use move table from FAST5 file instead of BAM file. If this flag is set, specify a basecall group for FAST5 file using --guppy_group parameter and ensure that the FAST5 files contains move table.', default=False, action='store_true')
 
     
     tombo_parser = main_subparsers.add_parser("detect-tombo", parents=[parent_parser],
@@ -60,7 +59,7 @@ if __name__ == '__main__':
                                       help="Call methylation from Tombo FAST5 files",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     tombo_required=tombo_parser.add_argument_group("Required Arguments")
-    tombo_required.add_argument("--fast5", help='Path to folder containing tombo requiggle Fast5 files. Fast5 files will be recusrviely searched', type=str, required=True)
+    tombo_required.add_argument("--input", help='Path to folder containing tombo requiggle Fast5 files. Fast5 files will be recusrviely searched', type=str, required=True)
     tombo_parser.add_argument("--tombo_group", help='Name of the tombo group',type=str, default='RawGenomeCorrected_000')
     tombo_parser.add_argument("--model", help='Name of the model. Default model is "tombo_R9.4.1" meant to be used for R9.4.1 flowcell reads, but you can provide a path to your own model. Use --print_models to display all models available.',type=str, default='tombo_R9.4.1')
     
@@ -70,7 +69,7 @@ if __name__ == '__main__':
                                       description="Merge per-read calls into per-site calls",
                                       help="Merge per-read calls into per-site calls",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
-    merge_parser.add_argument("--inputs",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --inputs or --list argument, but not both.')
+    merge_parser.add_argument("--input",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --input or --list argument, but not both.')
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)
     
     merge_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
@@ -125,8 +124,8 @@ if __name__ == '__main__':
     os.makedirs(args.output, exist_ok=True)
 
     if args.option=='merge':
-        if args.inputs:
-            read_pred_file_list= args.inputs 
+        if args.input:
+            read_pred_file_list= args.input
         
         elif args.list:
             with open(args.list,'r') as file_list:
@@ -144,17 +143,10 @@ if __name__ == '__main__':
     else:
         
         basecaller='guppy' if args.option=='detect-guppy' else 'tombo'
-        params={'fast5':args.fast5, 'output':args.output, 'threads':args.threads, 'file_name':args.file_name, 'window':10, 'model':args.model, 'basecaller':basecaller, 'skip_per_site':args.skip_per_site, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
+        params={'input':args.input, 'output':args.output, 'threads':args.threads, 'prefix':args.prefix, 'window':10, 'model':args.model, 'basecaller':basecaller, 'skip_per_site':args.skip_per_site, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         
         if params['basecaller'] == 'guppy':
-            if args.chrom:
-                chrom_list= args.chrom
-
-            else:
-                bam_file=pysam.Samfile(args.bam,'rb')
-                chrom_list=bam_file.references
-
-            params.update({'bam_path':args.bam, 'fasta_path':args.ref , 'chrom_list':chrom_list, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary})
+            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary})
 
         elif params['basecaller'] == 'tombo':
             params.update({'tombo_group': args.tombo_group})

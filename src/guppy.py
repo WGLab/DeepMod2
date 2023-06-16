@@ -2,7 +2,7 @@ from collections import defaultdict, ChainMap
 
 import time, itertools, h5py, pysam
 
-import datetime, os, shutil, argparse, sys
+import datetime, os, shutil, argparse, sys, re, array
 
 import multiprocessing as mp
 import numpy as np
@@ -16,70 +16,20 @@ from tensorflow import keras
 import tensorflow as tf
 from numba import jit
 
-def get_bam_info(args):
-    
-    chrom, bam_path, fasta_path, supplementary=args
-    bam=pysam.AlignmentFile(bam_path,'rb')
-    read_info={}
-    
-    fastafile=pysam.FastaFile(fasta_path)
-    
-    if chrom not in fastafile.references:
-        return read_info
-    
-    ref_seq=fastafile.fetch(chrom)
-    
-    if supplementary:
-        flag=0x4|0x100|0x200|0x400
-    else:
-        flag=0x4|0x100|0x200|0x400|0x800
+import queue
+import pod5 as p5
         
-    for pcol in bam.pileup(contig=chrom, flag_filter=flag, truncate=True, min_base_quality = 0):
-        try:
-            if ref_seq[pcol.pos].upper()=='C' and ref_seq[pcol.pos+1].upper()=='G':
-                for read in pcol.pileups:
-                    if read.alignment.is_reverse==False:
-                        if not read.is_del:
-                            if read.alignment.qname not in read_info:
-                                read_info[read.alignment.qname]='+%s\t' %chrom
-                            read_info[read.alignment.qname]+=',%d|%d' %(pcol.pos+1, read.query_position)
-        
-            elif ref_seq[pcol.pos].upper()=='G' and ref_seq[pcol.pos-1].upper()=='C':
-                for read in pcol.pileups:
-                    if read.alignment.is_reverse:
-                        if not read.is_del:
-                            if read.alignment.qname not in read_info:
-                                read_info[read.alignment.qname]='-%s\t' %chrom
-                            read_info[read.alignment.qname]+=',%d|%d' %(pcol.pos+1, read.alignment.query_length-read.query_position-1)
-                            
-        except IndexError:
-            continue
-    
-    return read_info
-
-def process_motifs(params, pool):
-    fastafile=pysam.FastaFile(params['fasta_path'])
-    
-    motif_info=[x for x in pool.imap_unordered(get_motif_pos, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path']), itertools.repeat(params['supplementary'])))]
-    
-    read_info=ChainMap(*bam_info)
-        
-    return read_info
-    
-def process_bam(params, pool):
-    fastafile=pysam.FastaFile(params['fasta_path'])
-    
-    bam_info=[x for x in pool.imap_unordered(get_bam_info, zip(params['chrom_list'], itertools.repeat(params['bam_path']), itertools.repeat(params['fasta_path']), itertools.repeat(params['supplementary'])))]
-    
-    read_info=ChainMap(*bam_info)
-        
-    return read_info
-
 @jit(nopython=True)
-def get_events(signal, move, start, stride):
-    move_len=len(move)
-    move_index=np.append(np.where(move)[0],[move_len])
-    rlen=np.sum(move)
+def get_events(signal, move):
+    stride, start, move_table=move
+    median=np.median(signal)
+    mad=np.median(np.abs(signal-median))
+    
+    signal=(signal-median)/mad
+    
+    move_len=len(move_table)
+    move_index=np.where(move_table)[0]
+    rlen=len(move_index)
     
     data=np.zeros((rlen,9))
     
@@ -101,129 +51,320 @@ def get_events(signal, move, start, stride):
                 tmp_cnt+=1
             data[i, j]=data[i, j]/tmp_cnt
 
-    return data, rlen
+    return data
 
-def get_read_signal(read, guppy_group):
-    segment=read.get_analysis_attributes(guppy_group)['segmentation']
-    
-    start=read.get_analysis_attributes('%s/Summary/segmentation' %segment)['first_sample_template']
-    stride=read.get_summary_data(guppy_group)['basecall_1d_template']['block_stride']
-    mean_qscore=read.get_summary_data(guppy_group)['basecall_1d_template']['mean_qscore']
-    sequence_length=read.get_summary_data(guppy_group)['basecall_1d_template']['sequence_length']
-    
-    signal=read.get_raw_data()
-    
-    median=np.median(signal)
-    mad=np.median(np.abs(signal-median))
-    
-    norm_signal=(signal-median)/mad
-    move=read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')
-    
-    base_level_data, rlen = get_events(norm_signal, move, start, stride)
-    
-    return base_level_data, rlen, mean_qscore, sequence_length
-
-
-
-
-
-def detect(args):
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-    
-    f5files, params, read_info, job_number = args
-    
-    output=os.path.join(params['output'],'intermediate_files', 'part_%d' %job_number)
-    model=keras.models.load_model(get_model(params['model']))
-    
-    threshold=0.5
-    strand_map={0:'+', 1:'-'}
-    base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
-    
-    window=params['window']
-    qscore_cutoff=params['qscore_cutoff']
-    length_cutoff=params['length_cutoff']
-    
-    counter=0
-    with open(output, 'w') as outfile:
-        features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list  = [], [], [], [], [], [], [], []
+def get_candidates(read_seq, align_data, ref_pos_dict):    
+    if align_data[0]:
+        is_mapped, is_forward, ref_name, reference_start, reference_end, read_length, aligned_pairs=align_data
+        aligned_pairs=np.array(aligned_pairs)
+        aligned_pairs[aligned_pairs==None]=-1
+        aligned_pairs=aligned_pairs.astype(int)
         
-        for filename in f5files:
+        c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
+        cg_id=np.array([m.start(0) for m in re.finditer(r'CG', read_seq)])
+        ref_motif_pos=ref_pos_dict[ref_name] if is_forward else ref_pos_dict[ref_name] +1
+
+        common_pos=ref_motif_pos[(ref_motif_pos>=reference_start)&(ref_motif_pos<reference_end)]
+        aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
+
+        aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
+
+
+        if not is_forward:
+            aligned_pairs_ref_wise=aligned_pairs_ref_wise[::-1]
+            aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
+
+        if len(cg_id)>0:
+            aligned_pairs_read_wise=aligned_pairs[aligned_pairs[:,0]!=-1][cg_id]
+
+            merged=np.vstack((aligned_pairs_ref_wise, aligned_pairs_read_wise))
+            _,ind=np.unique(merged[:,0], return_index=True)
+            merged=merged[ind]
+            return c_id, merged
+        
+        else:
+            return c_id, aligned_pairs_ref_wise
+    
+    else:
+        c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
+        cg_id=np.array([[m.start(0),-1] for m in re.finditer(r'CG', read_seq)])
+        return (c_id, cg_id)
+    
+def get_output(params, output_Q, methylation_event, header_dict):
+    header=pysam.AlignmentHeader.from_dict(header_dict)
+
+    output=params['output']
+    bam_output=os.path.join(output,'%s.bam' %params['prefix'])
+    txt_output=os.path.join(output,'%s.per_read' %params['prefix'])
+    
+    with open(txt_output,'w') as per_read_file:
+        per_read_file.write('read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\n')
+        
+        with pysam.AlignmentFile(bam_output, "wb", header=header) as outf:
+            while True:
+                if methylation_event.is_set() and output_Q.empty():
+                    break
+                else:
+                    try:
+                        res = output_Q.get(block=False)
+                        if res[0]:
+                            _, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list = res
+                            for read_data, candidate_list, MM, ML, pred_list in zip(*res[1:]):
+                                read_dict, read_info = read_data
+                                read=pysam.AlignedSegment.from_dict(read_dict,header)
+                                if MM:
+                                    read.set_tag('MM',MM,value_type='Z')
+                                    read.set_tag('ML',ML)
+                                read_name=read_dict['name']
+                                is_forward, chrom, mean_qscore, read_length=read_info
+                                chrom=chrom if chrom else 'NA'
+                                strand='+' if is_forward else '-'
+                                for i in range(len(pred_list)):
+                                    read_pos=candidate_list[i][0]+1
+                                    ref_pos=candidate_list[i][1]
+                                    ref_pos=str(ref_pos+1) if ref_pos!=-1 else 'NA'
+                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos, read_pos, strand, pred_list[i],mean_qscore,read_length))
+                        
+                                outf.write(read)
+                        else:
+                            _, total_read_info=res
+                            for read_dict in total_read_info:
+                                read=pysam.AlignedSegment.from_dict(read_dict,header)
+                                outf.write(read)
+                                
+                    except queue.Empty:
+                        pass    
+    
+    return txt_output, bam_output
+
+def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
+    base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
+    window=10
+    model=keras.models.load_model(get_model(params['model']))
+    xla_fn = tf.function(model, jit_compile=True)
+    chunk_size=2048 #params['chunk_size']
+    
+    total_candidate_list=[]
+    total_feature_list=[]
+    total_MM_list=[]
+    total_read_info=[]
+    total_c_idx=[]
+    total_unprocessed_reads=[]
+    r_count=0
+    while True:
+        if (signal_Q.empty() and input_event.is_set()):
+            break
+        
+        try:
+            data=signal_Q.get(block=False)
+            
+            signal, move, read_dict, align_data=data
+            
+            fq=read_dict['seq']
+            qual=read_dict['qual']
+            sequence_length=len(fq)
+            reverse=16 & int(read_dict['flag'])
+            fq=revcomp(fq) if reverse else fq
+            qual=qual[::-1] if reverse else qual
+
+            pos_list_c, pos_list_candidates=get_candidates(fq, align_data, ref_pos_dict)
+
+            pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
+                                                    &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
+
+            if len(pos_list_candidates)==0:
+                total_unprocessed_reads.append(read_dict)
+                continue
+
+            if not move[0]:
+                tags={x.split(':')[0]:x for x in read_dict['tags']}
+                start=int(tags['ts'].split(':')[-1])
+                mv=tags['mv'].split(',')
+
+                stride=int(mv[1])
+                move_table=np.array([int(x) for x in mv[2:]])
+                move=(stride, start, move_table)
+
+            base_seq=[base_map[x] for x in fq]
+            base_seq=np.eye(4)[base_seq]
+            base_qual=10.0**(-np.array([ord(q)-33 for q in qual])/10)[:,np.newaxis]
+            mean_qscore=-10*np.log10(np.mean(base_qual))
+            mat=get_events(signal, move)
+            mat=np.array(mat)
+            mat=np.hstack((mat, base_qual, base_seq))
+            
+            try:
+                c_idx=[True if x in pos_list_c else False for x in pos_list_candidates[:,0]]
+                c_idx_count=np.vectorize(pos_list_c.get)(pos_list_candidates[c_idx,0])
+                c_idx_count[1:]=c_idx_count[1:]-c_idx_count[:-1]-1
+                MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
+                total_c_idx.append(c_idx)
+                total_MM_list.append(MM)
+            
+            except ValueError:
+                total_c_idx.append([])
+                total_MM_list.append(None)
+            
+            MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
+
+            features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+
+            total_candidate_list.append(pos_list_candidates)
+            total_feature_list.append(features)
+            
+            total_read_info.append((read_dict, [align_data[1],align_data[2],align_data[5], mean_qscore]))
+            
+            
+            if len(total_read_info)>100:
+                read_counts=np.cumsum([len(x) for x in total_feature_list])[:-1]
+                features_list=np.vstack(total_feature_list)
+                features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
+
+                pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
+                if features_list.shape[0]%chunk_size:
+                    pred_list.append(model.predict(features_list[-1*(features_list.shape[0]%chunk_size):], verbose=0))
+
+                pred_list=np.vstack(pred_list)
+                pred_list=np.split(pred_list.ravel(), read_counts)
+                read_qual_list=[array.array('B',np.round(255*read_pred_list[c_idx]).astype(int)) for read_pred_list, c_idx in zip(pred_list, total_c_idx)]
+
+                output_Q.put([True, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list])
+                total_candidate_list, total_feature_list, total_MM_list, total_read_info, total_c_idx=[], [], [], [], []
+                
+            if len(total_unprocessed_reads)>100:
+                output_Q.put([False, total_unprocessed_reads])
+                total_unprocessed_reads=[]
+
+        except queue.Empty:
+            pass            
+
+    if len(total_read_info)>0:
+        read_counts=np.cumsum([len(x) for x in total_feature_list])[:-1]
+        features_list=np.vstack(total_feature_list)
+        features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
+
+        pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
+        if features_list.shape[0]%chunk_size:
+            pred_list.append(model.predict(features_list[-1*(features_list.shape[0]%chunk_size):], verbose=0))
+
+        pred_list=np.vstack(pred_list)
+
+        pred_list=np.split(pred_list.ravel(), read_counts)
+
+        read_qual_list=[array.array('B',np.round(255*read_pred_list[c_idx]).astype(int)) for read_pred_list, c_idx in zip(pred_list, total_c_idx)]
+
+        output_Q.put([True, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list])
+
+    if len(total_unprocessed_reads)>0:
+        output_Q.put([False, total_unprocessed_reads])
+
+    return
+
+def get_input(params, signal_Q, output_Q, input_event):    
+    bam=params['bam']
+    bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
+    bam_index=pysam.IndexedReads(bam_file)
+    bam_index.build()
+    
+    input_=params['input']
+    signal_files= [input_] if os.path.isfile(input_) else Path(input_).rglob("*.%s" %params['file_type'])
+
+    if params['file_type']=='fast5':
+        guppy_group=params['guppy_group']
+        for filename in signal_files:
             with get_fast5_file(filename, mode="r") as f5:
                 for read in f5.get_reads():
+                    if signal_Q.qsize()>10000:
+                        time.sleep(10)
                     read_name=read.read_id
+                    signal=read.get_raw_data()
                     
+                    if params['fast5_move']:
+                        segment=read.get_analysis_attributes(guppy_group)['segmentation']
+                        start=read.get_analysis_attributes('%s/Summary/segmentation' %segment)['first_sample_template']
+                        stride=read.get_summary_data(guppy_group)['basecall_1d_template']['block_stride']
+                        move_table=read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')
+                        move=(stride, start, move_table)
+                    else:
+                        move=(None,None,None)
+                        
                     try:
-                        read_info_string=read_info[read_name].split()
-                        mapped_strand, mapped_chrom=read_info_string[0][0], read_info_string[0][1:] 
-                        read_pos_list=read_info_string[1][1:].split(',')
-                        base_level_data, seq_len, mean_qscore, sequence_length = get_read_signal(read, params['guppy_group'])
-
+                        read_iter=bam_index.find(read_name)
+                        for read in read_iter:
+                            if not (read.is_supplementary or read.is_secondary):
+                                read_dict=read.to_dict()
+                                align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
+                                data=(signal, move, read_dict, align_data)
+                                signal_Q.put(data)
+                                break                            
                     except KeyError:
+                        print('Read:%s not found in BAM file' %read_name)
                         continue
-                   
-                    if mean_qscore<qscore_cutoff or sequence_length<length_cutoff:
+                    
+    else:
+        move=(None,None,None)
+        for filename in signal_files:
+            with p5.Reader(filename) as reader:
+                for read in reader.reads():
+                    if signal_Q.qsize()>10000:
+                        time.sleep(10)
+                        
+                    read_name=str(read.read_id)
+                    signal=read.signal
+                    try:
+                        read_iter=bam_index.find(read_name)
+                        for read in read_iter:
+                            if not (read.is_supplementary or read.is_secondary):
+                                read_dict=read.to_dict()
+                                align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
+                                data=(signal, move, read_dict, align_data)
+                                signal_Q.put(data)
+                                break                            
+                    except KeyError:
+                        print('Read:%s not found in BAM file' %read_name)
                         continue
-                
-                    read_fastq_record=read.get_analysis_dataset('%s/BaseCalled_template' %params['guppy_group'], 'Fastq').split('\n')
-                    fq=read_fastq_record[1]
-                    qual=read_fastq_record[3]
-
-                    for x in read_pos_list:
-
-                        x=x.split('|')
-                        pos, read_pos=int(x[0]), int(x[1])
-                        if read_pos>window and read_pos<sequence_length-window-1:
-                            mat=base_level_data[read_pos-window: read_pos+window+1]
-                            base_seq=[base_map[fq[x]] for x in range(read_pos-window, read_pos+window+1)]
-                            base_qual=10.0**(-np.array([ord(q)-33 for q in qual[read_pos-window : read_pos+window+1]])/10)[:,np.newaxis]
-                            base_seq=np.eye(4)[base_seq]
-                            mat=np.hstack((np.array(mat), base_qual, base_seq))
-
-                            if np.size(mat)!=21*14:  
-                                continue
-
-                            features_list.append(mat)
-                            pos_list.append(pos)
-                            pos_list_read.append(read_pos)
-                            chr_list.append(mapped_chrom)
-                            strand_list.append(mapped_strand)
-                            read_names_list.append(read_name)     
-                            mean_qscore_list.append(mean_qscore)
-                            sequence_length_list.append(sequence_length)
-                            counter+=1
-
-                            if counter==1000:
-                                counter=0
-                                features_list=np.array(features_list)
-                                features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
-                                pred_list=model.predict(features_list, verbose=0)
-
-                                for i in range(len(pos_list)):
-                                    pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
-                                    outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
-
-                                features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
-                                
-                                outfile.flush()
-                                os.fsync(outfile.fileno())
-                                
-                                
-        if counter>0:
-
-            features_list=np.array(features_list)
-            features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
-            pred_list=model.predict(features_list, verbose=0)
-
-            for i in range(len(pos_list)):
-                pos, read_pos, chrom, strand, read_name, mean_qscore, sequence_length = pos_list[i], pos_list_read[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
-                outfile.write('%s\t%s\t%d\t%d\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, read_pos+1, strand, pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
-
-            features_list, pos_list, pos_list_read, chr_list, strand_list, read_names_list, mean_qscore_list, sequence_length_list = [], [], [], [], [], [], [], []
-            
-            outfile.flush()
-            os.fsync(outfile.fileno())
+    input_event.set()
+    return
+    
+def call_manager(params):
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
         
-    return output
+    bam=params['bam']
+    bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
+    header_dict=bam_file.header.to_dict()
+    
+    if params['ref']:
+        ref_fasta=pysam.FastaFile(params['ref'])
+        ref_pos_dict={rname:np.array([m.start(0) for m in re.finditer(r'CG', ref_fasta.fetch(rname))]) for rname in ref_fasta.references}    
+    else:
+        ref_pos_dict={}
+        
+    pmanager = mp.Manager()
+    signal_Q = pmanager.Queue()
+    output_Q = pmanager.Queue()
+    methylation_event=pmanager.Event()
+    input_event=pmanager.Event()
+    
+    handlers = []
+    
+    input_process = mp.Process(target=get_input, args=(params, signal_Q, output_Q, input_event))
+    input_process.start()
+    handlers.append(input_process)
+    
+    for hid in range(max(1,params['threads']-1)):
+        p = mp.Process(target=process, args=(params, ref_pos_dict, signal_Q, output_Q, input_event));
+        p.start();
+        handlers.append(p);
+    
+    output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict));
+    output_process.start();
+    
+    for job in handlers:
+        job.join()
+    
+    methylation_event.set()
+    output_process.join()
+    
+    return

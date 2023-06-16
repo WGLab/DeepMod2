@@ -116,7 +116,7 @@ def detect(args):
         
     strand_map={0:'+', 1:'-'}
     
-    f5files, params, read_info, job_number = args
+    f5files, params, job_number = args
     
     threshold=0.5
     
@@ -139,7 +139,7 @@ def detect(args):
             
             for i in range(len(pos_list)):
                 pos, chrom, strand, read_name, mean_qscore, sequence_length  = pos_list[i], chr_list[i], strand_list[i], read_names_list[i], mean_qscore_list[i], sequence_length_list[i]
-                outfile.write('%s\t%s\t%d\tN/A\t%s\t%.4f\t%d\t%.4f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], 1 if pred_list[i]>=threshold else 0, mean_qscore, sequence_length))
+                outfile.write('%s\t%s\t%d\tN/A\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, pos, strand_map[strand], pred_list[i], mean_qscore, sequence_length))
             outfile.flush()
             os.fsync(outfile.fileno())
     

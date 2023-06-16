@@ -12,10 +12,10 @@ model_dict={'guppy_hg1_R9.4':{'path':'models/guppy/guppy_r9.4/guppy_hg1_r9.4.h5'
                               'help': 'Model trained on chr1 of HG002 R10.4.1 Guppy v6 basecalled FAST5 files and bisulfite methylation calls from Oxford Nanoporetech Q20+ data release.'}
            }
 
-base_map={'A':'T','T':'A','C':'G','G':'C'}
+comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
 
 def revcomp(s):
-    return ''.join(base_map[x] for x in s[::-1])
+    return ''.join(comp_base_map[x] for x in s[::-1])
 
 def get_model_help():
     for n,model in enumerate(model_dict):
@@ -53,7 +53,12 @@ def run_cmd(cmd, verbose=False, output=False,error=False):
         return stdout
     if error:
         return stderr
-    
+
+
+def split_array(a, n=2048):
+    for i in range(a.shape[0] // n):
+        yield a[n*i:n*(i+1)]
+        
 def split_list(l,n=1000):
     i=0    
     chunk = l[i*n:(i+1)*n]
