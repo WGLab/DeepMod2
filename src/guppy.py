@@ -116,14 +116,14 @@ def get_output(params, output_Q, methylation_event, header_dict):
                                     read.set_tag('MM',MM,value_type='Z')
                                     read.set_tag('ML',ML)
                                 read_name=read_dict['name']
-                                is_forward, chrom, mean_qscore, read_length=read_info
+                                is_forward, chrom, read_length, mean_qscore=read_info
                                 chrom=chrom if chrom else 'NA'
                                 strand='+' if is_forward else '-'
                                 for i in range(len(pred_list)):
                                     read_pos=candidate_list[i][0]+1
                                     ref_pos=candidate_list[i][1]
                                     ref_pos=str(ref_pos+1) if ref_pos!=-1 else 'NA'
-                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos, read_pos, strand, pred_list[i],mean_qscore,read_length))
+                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos, read_pos, strand, pred_list[i],mean_qscore, read_length))
                         
                                 outf.write(read)
                         else:

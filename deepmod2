@@ -5,13 +5,6 @@ import time, itertools
 import datetime, os, shutil, argparse, sys, pysam
 
 from src import utils
-
-def run(params):
-    from src import modDetect
-    read_pred_file=modDetect.per_read_predict(params)
-    
-    if not params['skip_per_site']:
-        site_pred_file=modDetect.per_site_detect([read_pred_file], params)
     
 if __name__ == '__main__':
     
@@ -159,6 +152,8 @@ if __name__ == '__main__':
             for k in vars(args):
                 file.write('{}: {}\n'.format(k,vars(args)[k]) )
 
-        run(params)
+        
+        from src import modDetect
+        read_pred_file=modDetect.per_read_predict(params)
     
     print('\n%s: Time elapsed=%.4fs' %(str(datetime.datetime.now()),time.time()-t), flush=True)
