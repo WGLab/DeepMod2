@@ -85,10 +85,10 @@ def per_site_detect(read_pred_file_list, params):
         with open(read_pred_file,'r') as read_file:
             read_file.readline()
             for line in read_file:
-                read, chrom, pos, read_pos, strand, score, _, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
+                read, chrom, pos, read_pos, strand, score, mean_qscore, sequence_length = line.rstrip('\n').split('\t')
                 score=float(score)
 
-                if float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
+                if float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff or pos=='NA':
                     continue
                 
                 #read, chrom, pos, read_pos, strand, score, meth = line.rstrip('\n').split('\t')
@@ -125,7 +125,7 @@ def per_site_detect(read_pred_file_list, params):
 
 def annotate(params):
     input_bam, per_read=params['bam'], params['per_read']
-    output_bam=os.path.join(params['output'], params['file_name']+'.bam')
+    output_bam=os.path.join(params['output'], params['prefix']+'.bam')
     
     per_read_stats=get_per_read_stats(per_read)
     bam_file=pysam.AlignmentFile(input_bam,'rb')

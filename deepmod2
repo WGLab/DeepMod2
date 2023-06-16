@@ -125,12 +125,12 @@ if __name__ == '__main__':
                 read_pred_file_list=[x.rstrip('\n') for x in file_list.readlines()]
         
         from src import modDetect
-        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t}
+        params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t}
         site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
         
     elif args.option=='annotate':
         from src import modDetect
-        params={'output':args.output, 'file_name':args.file_name, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'bam':args.bam, 'per_read':args.per_read_file}
+        params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'bam':args.bam, 'per_read':args.per_read_file}
         site_pred_file=modDetect.annotate(params)
         
     else:
