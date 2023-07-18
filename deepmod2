@@ -16,12 +16,16 @@ if __name__ == '__main__':
     grand_parent_parser.add_argument("--prefix", help='Prefix for the output files',type=str, default='output')
     grand_parent_parser.add_argument("--output", help= 'Path to folder where intermediate and final files will be stored, default is current working directory', type=str)
     grand_parent_parser.add_argument("--threads", help='Number of processors to use',type=int, default=1)
-    grand_parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=5)
-    grand_parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=500)
+    grand_parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=0)
+    grand_parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=0)
     
     
     parent_parser = argparse.ArgumentParser(add_help=False, parents=[grand_parent_parser])
-    parent_parser.add_argument("--skip_per_site", help='Skip per site detection and stop after per-read methylation calling.' ,default=False, action='store_true')
+    
+    parent_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
+
+    parent_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
+    
     
     guppy_parser = main_subparsers.add_parser("detect-guppy", parents=[parent_parser],
                                       add_help=True,
@@ -65,9 +69,7 @@ if __name__ == '__main__':
     merge_parser.add_argument("--input",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --input or --list argument, but not both.')
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)
     
-    merge_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
-
-    merge_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
+    
     
     annotate_parser = main_subparsers.add_parser("annotate", parents=[grand_parent_parser],
                                       add_help=True,
@@ -136,10 +138,10 @@ if __name__ == '__main__':
     else:
         
         basecaller='guppy' if args.option=='detect-guppy' else 'tombo'
-        params={'input':args.input, 'output':args.output, 'threads':args.threads, 'prefix':args.prefix, 'window':10, 'model':args.model, 'basecaller':basecaller, 'skip_per_site':args.skip_per_site, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
+        params={'input':args.input, 'output':args.output, 'threads':args.threads, 'prefix':args.prefix, 'window':10, 'model':args.model, 'basecaller':basecaller, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         
         if params['basecaller'] == 'guppy':
-            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary})
+            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary,  'mod_t':args.mod_t, 'unmod_t':args.unmod_t})
 
         elif params['basecaller'] == 'tombo':
             params.update({'tombo_group': args.tombo_group})
@@ -154,6 +156,6 @@ if __name__ == '__main__':
 
         
         from src import modDetect
-        read_pred_file=modDetect.per_read_predict(params)
+        modDetect.per_read_predict(params)
     
     print('\n%s: Time elapsed=%.4fs' %(str(datetime.datetime.now()),time.time()-t), flush=True)

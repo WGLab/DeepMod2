@@ -4,6 +4,9 @@ import time, itertools, h5py, pysam
 
 import datetime, os, shutil, argparse, sys, re, array
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import multiprocessing as mp
 import numpy as np
 
@@ -68,14 +71,19 @@ def get_candidates(read_seq, align_data, ref_pos_dict):
         aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
 
         aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
-
+        aligned_pairs_read_wise=aligned_pairs[aligned_pairs[:,0]!=-1]
 
         if not is_forward:
             aligned_pairs_ref_wise=aligned_pairs_ref_wise[::-1]
             aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
-
+            aligned_pairs_read_wise=aligned_pairs_read_wise[::-1]
+            aligned_pairs_read_wise[:,0]=read_length-aligned_pairs_read_wise[:,0]-1
+            
         if len(cg_id)>0:
-            aligned_pairs_read_wise=aligned_pairs[aligned_pairs[:,0]!=-1][cg_id]
+            aligned_pairs_read_wise=aligned_pairs_read_wise[cg_id]
+            
+            #if need to disable clipped bases
+            #aligned_pairs_read_wise=aligned_pairs_read_wise[(reference_start<=aligned_pairs_read_wise[:,1]) & (aligned_pairs_read_wise[:,1]<reference_end)]
 
             merged=np.vstack((aligned_pairs_ref_wise, aligned_pairs_read_wise))
             _,ind=np.unique(merged[:,0], return_index=True)
@@ -95,10 +103,20 @@ def get_output(params, output_Q, methylation_event, header_dict):
 
     output=params['output']
     bam_output=os.path.join(output,'%s.bam' %params['prefix'])
-    txt_output=os.path.join(output,'%s.per_read' %params['prefix'])
+    per_read_file_path=os.path.join(output,'%s.per_read' %params['prefix'])
+
     
-    with open(txt_output,'w') as per_read_file:
+    per_site_file_path=os.path.join(output,'%s.per_site' %params['prefix'])
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
+    mod_t=params['mod_t']
+    unmod_t=params['unmod_t']
+    
+    per_site_pred={}
+    
+    with open(per_read_file_path,'w') as per_read_file:
         per_read_file.write('read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\n')
+        
         
         with pysam.AlignmentFile(bam_output, "wb", header=header) as outf:
             while True:
@@ -119,11 +137,30 @@ def get_output(params, output_Q, methylation_event, header_dict):
                                 is_forward, chrom, read_length, mean_qscore=read_info
                                 chrom=chrom if chrom else 'NA'
                                 strand='+' if is_forward else '-'
+                                
                                 for i in range(len(pred_list)):
                                     read_pos=candidate_list[i][0]+1
                                     ref_pos=candidate_list[i][1]
-                                    ref_pos=str(ref_pos+1) if ref_pos!=-1 else 'NA'
-                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos, read_pos, strand, pred_list[i],mean_qscore, read_length))
+                                    score=pred_list[i]
+                                    
+                                    ref_pos_str=str(ref_pos+1) if ref_pos!=-1 else 'NA'
+                                                                            
+                                    if ref_pos_str=='NA' or float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
+                                        pass
+                                    else:
+                                        if (chrom, ref_pos_str, strand) not in per_site_pred:
+                                            # unmod, mod, score
+                                            per_site_pred[(chrom, ref_pos_str, strand)]=[0,0,0]
+
+                                        if score>=mod_t:
+                                            per_site_pred[(chrom, ref_pos_str, strand)][1]+=1
+                                            per_site_pred[(chrom, ref_pos_str, strand)][2]+=float(score)
+
+                                        elif score<unmod_t:
+                                            per_site_pred[(chrom, ref_pos_str, strand)][0]+=1
+                                            per_site_pred[(chrom, ref_pos_str, strand)][2]+=score
+                                        
+                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos_str, read_pos, strand, score,mean_qscore, read_length))
                         
                                 outf.write(read)
                         else:
@@ -135,7 +172,21 @@ def get_output(params, output_Q, methylation_event, header_dict):
                     except queue.Empty:
                         pass    
     
-    return txt_output, bam_output
+    with open(per_site_file_path, 'w') as per_site_file:
+        per_site_file.write('chromosome\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
+        for x,y in per_site_pred.items():
+            tot_cov=y[0]+y[1]
+            if tot_cov>0:
+                p=y[2]/tot_cov
+                per_site_file.write('%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+    
+    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
+    
+    print('%s: Modification Tagged BAM file: %s' %(str(datetime.datetime.now()),bam_output), flush=True)
+    print('%s: Per Read Prediction file: %s' %(str(datetime.datetime.now()), per_read_file_path), flush=True)
+    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+
+    return
 
 def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
@@ -175,16 +226,21 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
             if len(pos_list_candidates)==0:
                 total_unprocessed_reads.append(read_dict)
                 continue
-
+                
             if not move[0]:
-                tags={x.split(':')[0]:x for x in read_dict['tags']}
-                start=int(tags['ts'].split(':')[-1])
-                mv=tags['mv'].split(',')
+                try:
+                    tags={x.split(':')[0]:x for x in read_dict['tags']}
+                    start=int(tags['ts'].split(':')[-1])
+                    mv=tags['mv'].split(',')
 
-                stride=int(mv[1])
-                move_table=np.array([int(x) for x in mv[2:]])
-                move=(stride, start, move_table)
-
+                    stride=int(mv[1])
+                    move_table=np.array([int(x) for x in mv[2:]])
+                    move=(stride, start, move_table)
+                except KeyError:
+                    print('Read:%s no move table or stride or signal start found' %read_name)
+                    total_unprocessed_reads.append(read_dict)
+                    continue
+                    
             base_seq=[base_map[x] for x in fq]
             base_seq=np.eye(4)[base_seq]
             base_qual=10.0**(-np.array([ord(q)-33 for q in qual])/10)[:,np.newaxis]
@@ -205,8 +261,6 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
                 total_c_idx.append([])
                 total_MM_list.append(None)
             
-            MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
-
             features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
 
             total_candidate_list.append(pos_list_candidates)
@@ -263,8 +317,11 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
 def get_input(params, signal_Q, output_Q, input_event):    
     bam=params['bam']
     bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
+    
+    print('%s: Building BAM index.' %str(datetime.datetime.now()), flush=True)
     bam_index=pysam.IndexedReads(bam_file)
     bam_index.build()
+    print('%s: Finished building BAM index.' %str(datetime.datetime.now()), flush=True)
     
     input_=params['input']
     signal_files= [input_] if os.path.isfile(input_) else Path(input_).rglob("*.%s" %params['file_type'])
@@ -296,7 +353,8 @@ def get_input(params, signal_Q, output_Q, input_event):
                                 align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
-                                break                            
+                                break
+                        
                     except KeyError:
                         print('Read:%s not found in BAM file' %read_name)
                         continue
@@ -319,7 +377,7 @@ def get_input(params, signal_Q, output_Q, input_event):
                                 align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
-                                break                            
+                                break
                     except KeyError:
                         print('Read:%s not found in BAM file' %read_name)
                         continue
@@ -335,12 +393,14 @@ def call_manager(params):
     bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
     header_dict=bam_file.header.to_dict()
     
+    print('%s: Getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     if params['ref']:
         ref_fasta=pysam.FastaFile(params['ref'])
-        ref_pos_dict={rname:np.array([m.start(0) for m in re.finditer(r'CG', ref_fasta.fetch(rname))]) for rname in ref_fasta.references}    
+        ref_pos_dict={rname:np.array([m.start(0) for m in re.finditer(r'CG', ref_fasta.fetch(rname).upper())]) for rname in ref_fasta.references}    
     else:
         ref_pos_dict={}
-        
+    print('%s: Finished getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
+    
     pmanager = mp.Manager()
     signal_Q = pmanager.Queue()
     output_Q = pmanager.Queue()
