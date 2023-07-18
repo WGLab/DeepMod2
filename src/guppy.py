@@ -347,13 +347,20 @@ def get_input(params, signal_Q, output_Q, input_event):
                         
                     try:
                         read_iter=bam_index.find(read_name)
+                        non_primary_reads=[]
                         for read in read_iter:
+                            read_dict=read.to_dict()
                             if not (read.is_supplementary or read.is_secondary):
                                 read_dict=read.to_dict()
                                 align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
-                                break
+                            
+                            else:
+                                non_primary_reads.append(read_dict)
+                        
+                        if len(non_primary_reads)>0:
+                            output_Q.put([False, non_primary_reads])
                         
                     except KeyError:
                         print('Read:%s not found in BAM file' %read_name)
@@ -371,13 +378,21 @@ def get_input(params, signal_Q, output_Q, input_event):
                     signal=read.signal
                     try:
                         read_iter=bam_index.find(read_name)
+                        non_primary_reads=[]
                         for read in read_iter:
+                            read_dict=read.to_dict()
                             if not (read.is_supplementary or read.is_secondary):
                                 read_dict=read.to_dict()
                                 align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
-                                break
+                            
+                            else:
+                                non_primary_reads.append(read_dict)
+                        
+                        if len(non_primary_reads)>0:
+                            output_Q.put([False, non_primary_reads])
+                            
                     except KeyError:
                         print('Read:%s not found in BAM file' %read_name)
                         continue
