@@ -112,12 +112,12 @@ def per_site_detect(read_pred_file_list, params):
     print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     with open(output,'w') as outfile:
-        outfile.write('chromosome\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
+        outfile.write('chromosome\tposition_before\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
         for x,y in per_site_pred.items():
             tot_cov=y[0]+y[1]
             if tot_cov>0:
                 p=y[2]/tot_cov
-                outfile.write('%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+                outfile.write('%s\t%d\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], int(x[1])-1,x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
     
     print('%s: Finished Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     

@@ -15,8 +15,6 @@ from pathlib import Path
 from .utils import *
 from ont_fast5_api.fast5_interface import get_fast5_file
 
-from tensorflow import keras
-import tensorflow as tf
 from numba import jit
 
 import queue
@@ -144,7 +142,7 @@ def get_output(params, output_Q, methylation_event, header_dict):
                                     score=pred_list[i]
                                     
                                     ref_pos_str=str(ref_pos+1) if ref_pos!=-1 else 'NA'
-                                                                            
+                                    
                                     if ref_pos_str=='NA' or float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
                                         pass
                                     else:
@@ -173,12 +171,12 @@ def get_output(params, output_Q, methylation_event, header_dict):
                         pass    
     
     with open(per_site_file_path, 'w') as per_site_file:
-        per_site_file.write('chromosome\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
+        per_site_file.write('chromosome\tposition_before\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
         for x,y in per_site_pred.items():
             tot_cov=y[0]+y[1]
             if tot_cov>0:
                 p=y[2]/tot_cov
-                per_site_file.write('%s\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+                per_site_file.write('%s\t%d\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], int(x[1])-1,x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
     
     print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
     
@@ -189,10 +187,25 @@ def get_output(params, output_Q, methylation_event, header_dict):
     return
 
 def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
+    from tensorflow import keras
+    import tensorflow as tf
+    
+    gpus = tf.config.list_physical_devices('GPU')
+
+    if gpus:
+        try:
+            # Currently, memory growth needs to be the same across GPUs
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tf.config.list_logical_devices('GPU')
+        except RuntimeError as e:
+            # Memory growth must be set before GPUs have been initialized
+            print(e)
+
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     window=10
     model=keras.models.load_model(get_model(params['model']))
-    xla_fn = tf.function(model, jit_compile=True)
+    xla_fn = model if gpus else tf.function(model, jit_compile=True)
     chunk_size=2048 #params['chunk_size']
     
     total_candidate_list=[]
@@ -276,7 +289,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
 
                 pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
                 if features_list.shape[0]%chunk_size:
-                    pred_list.append(model.predict(features_list[-1*(features_list.shape[0]%chunk_size):], verbose=0))
+                    pred_list.append(model(features_list[-1*(features_list.shape[0]%chunk_size):]).numpy())
 
                 pred_list=np.vstack(pred_list)
                 pred_list=np.split(pred_list.ravel(), read_counts)
@@ -299,7 +312,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
 
         pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
         if features_list.shape[0]%chunk_size:
-            pred_list.append(model.predict(features_list[-1*(features_list.shape[0]%chunk_size):], verbose=0))
+            pred_list.append(model(features_list[-1*(features_list.shape[0]%chunk_size):]).numpy())
 
         pred_list=np.vstack(pred_list)
 
@@ -399,11 +412,7 @@ def get_input(params, signal_Q, output_Q, input_event):
     input_event.set()
     return
     
-def call_manager(params):
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-        
+def call_manager(params):        
     bam=params['bam']
     bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
     header_dict=bam_file.header.to_dict()

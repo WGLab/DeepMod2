@@ -19,12 +19,13 @@ if __name__ == '__main__':
     grand_parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=0)
     grand_parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=0)
     
+    grand_parent_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
+
+    grand_parent_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
     
     parent_parser = argparse.ArgumentParser(add_help=False, parents=[grand_parent_parser])
     
-    parent_parser.add_argument("--mod_t",  help=  'Probability threshold for a per-read prediction to be considered modified. Only predictiond with probability >= mod_t will be considered as modified for calculation of per-site modification levels.', default=0.5, type=float)
-
-    parent_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
+    
     
     
     guppy_parser = main_subparsers.add_parser("detect-guppy", parents=[parent_parser],
