@@ -58,7 +58,7 @@ We now have two options for how to run DeepMod2: a) run DeepMod2 on unaligned BA
 ### 4.1.1 DeepMod2 Methylation calling from aligned reads
 First we will carry out alignment of unaligned BAM files using samtools fastq module and minimap2. You can alternatively use [dorardo aligner wrapper](https://github.com/nanoporetech/dorado#alignment) of minimap2 to align reads from unaligned BAM files.
 ```
-find ${BASECALL_DIR}/fast5_data/ \( -path "*/pass/*" -o -path "*/fail/*" \) -type f -name "*.bam"|samtools cat -b -|samtools fastq - -T '*'|minimap2 -ax map-ont ${INPUT_DIR}/GRCh38.fa -|samtools view -Shu |samtools sort -O BAM  -o ${BASECALL_DIR}/fast5_data/merged.aligned.bam --write-index
+find ${BASECALL_DIR}/fast5_data/ \( -path "*/pass/*" -o -path "*/fail/*" \) -type f -name "*.bam"|samtools cat -b -|samtools fastq - -T mv,ts | minimap2 -ax map-ont ${INPUT_DIR}/GRCh38.fa - -y|samtools view -Shu |samtools sort -O BAM  -o ${BASECALL_DIR}/fast5_data/merged.aligned.bam --write-index
 ```
 
 We will provide the original FAST5 file to DeepMod2 as well as the aligned BAM file as inputs, and run `detect-guppy` module of DeepMod2 by specifying that the signal input file is in FAST5 format using `--file_type fast5` parameter. Running this command should take 1-2mins.
