@@ -63,10 +63,18 @@ def per_read_predict(params):
 def per_site_detect(read_pred_file_list, params):
     qscore_cutoff=params['qscore_cutoff']
     length_cutoff=params['length_cutoff']
+    include_non_cpg_ref=params['include_non_cpg_ref']
     
     mod_t=params['mod_t']
     unmod_t=params['unmod_t']
     
+    if params['ref']:
+        ref_fasta=pysam.FastaFile(params['ref'])
+        ref_pos_set_dict={rname:set(m.start(0) for m in re.finditer(r'CG', ref_fasta.fetch(rname).upper())) for rname in ref_fasta.references}    
+    else:
+        print('%s: No reference file provided, therefore per site output will include non CpG reference sites and assume --include_non_cpg_ref flag is set.'  %str(datetime.datetime.now()), flush=True)
+        include_non_cpg_ref=True
+        
     print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     total_files=len(read_pred_file_list)
@@ -112,12 +120,18 @@ def per_site_detect(read_pred_file_list, params):
     print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     
     with open(output,'w') as outfile:
-        outfile.write('chromosome\tposition_before\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
+        outfile.write('#chromosome\tposition_before\tposition\tmethylation_percentage\tstrand\ttotal_coverage\tmethylation_percentage\tmean_methylation_probability\n')
         for x,y in per_site_pred.items():
             tot_cov=y[0]+y[1]
+            chrom, pos, strand= x[0], int(x[1]), x[2]
             if tot_cov>0:
+                if include_non_cpg_ref:
+                    pass
+                else:
+                    if (strand=='+' and pos-1 not in ref_pos_set_dict[chrom]) or (strand=='-' and pos-2 not in ref_pos_set_dict[chrom]):
+                        continue
                 p=y[2]/tot_cov
-                outfile.write('%s\t%d\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], int(x[1])-1,x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+                outfile.write('%s\t%d\t%d\t%.4f\t%s\t%d\t%d\t%.4f\n' %(chrom, pos-1, pos, y[1]/tot_cov, strand, tot_cov, y[1], p))
     
     print('%s: Finished Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
     

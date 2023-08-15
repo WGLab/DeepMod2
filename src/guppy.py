@@ -96,7 +96,8 @@ def get_candidates(read_seq, align_data, ref_pos_dict):
         cg_id=np.array([[m.start(0),-1] for m in re.finditer(r'CG', read_seq)])
         return (c_id, cg_id)
     
-def get_output(params, output_Q, methylation_event, header_dict):
+def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
+    include_non_cpg_ref=params['include_non_cpg_ref']
     header=pysam.AlignmentHeader.from_dict(header_dict)
 
     output=params['output']
@@ -112,6 +113,8 @@ def get_output(params, output_Q, methylation_event, header_dict):
     
     per_site_pred={}
     
+    counter=0
+    
     with open(per_read_file_path,'w') as per_read_file:
         per_read_file.write('read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\n')
         
@@ -123,6 +126,9 @@ def get_output(params, output_Q, methylation_event, header_dict):
                 else:
                     try:
                         res = output_Q.get(block=False)
+                        counter+=1
+                        if counter%10000==0:
+                            print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
                         if res[0]:
                             _, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list = res
                             for read_data, candidate_list, MM, ML, pred_list in zip(*res[1:]):
@@ -170,13 +176,27 @@ def get_output(params, output_Q, methylation_event, header_dict):
                     except queue.Empty:
                         pass    
     
+    print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
+    print('%s: Finished Per-Read Methylation Output. Starting Per-Site output.' %str(datetime.datetime.now()), flush=True)
+    
+    if include_non_cpg_ref:
+        ref_pos_set_dict=None
+    else:
+        ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items()}
+        
     with open(per_site_file_path, 'w') as per_site_file:
-        per_site_file.write('chromosome\tposition_before\tposition\tstrand\ttotal_coverage\tmethylation_coverage\tmethylation_percentage\tmean_methylation_probability\n')
+        per_site_file.write('#chromosome\tposition_before\tposition\tmethylation_percentage\tstrand\ttotal_coverage\tmethylation_percentage\tmean_methylation_probability\n')
         for x,y in per_site_pred.items():
             tot_cov=y[0]+y[1]
+            chrom, pos, strand= x[0], int(x[1]), x[2]
             if tot_cov>0:
+                if include_non_cpg_ref:
+                    pass
+                else:
+                    if (strand=='+' and pos-1 not in ref_pos_set_dict[chrom]) or (strand=='-' and pos-2 not in ref_pos_set_dict[chrom]):
+                        continue
                 p=y[2]/tot_cov
-                per_site_file.write('%s\t%d\t%s\t%s\t%d\t%d\t%.4f\t%.4f\n' %(x[0], int(x[1])-1,x[1], x[2], tot_cov, y[1], y[1]/tot_cov, p))
+                per_site_file.write('%s\t%d\t%d\t%.4f\t%s\t%d\t%d\t%.4f\n' %(chrom, pos-1, pos, y[1]/tot_cov, strand, tot_cov, y[1], p))
     
     print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
     
@@ -442,7 +462,7 @@ def call_manager(params):
         p.start();
         handlers.append(p);
     
-    output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict));
+    output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict, ref_pos_dict));
     output_process.start();
     
     for job in handlers:

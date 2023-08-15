@@ -23,6 +23,10 @@ if __name__ == '__main__':
 
     grand_parent_parser.add_argument("--unmod_t",  help=  'Probability threshold for a per-read prediction to be considered unmodified. Only predictiond with probability < unmod_t will be considered as unmodified for calculation of per-site modification levels.', default=0.5, type=float)
     
+    grand_parent_parser.add_argument("--include_non_cpg_ref",  help='Include non-CpG reference loci in per-site output where reads have CpG motif.',default=False, action='store_true')
+    
+    grand_parent_parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
+    
     parent_parser = argparse.ArgumentParser(add_help=False, parents=[grand_parent_parser])
     
     
@@ -41,8 +45,6 @@ if __name__ == '__main__':
     guppy_required.add_argument("--bam", help='Path to aligned or unaligned BAM file. It is ideal to have move table in BAM file but move table from FAST5 fies can also be used. Aligned BAM file is required for reference anchored methylation calls, otherwise only the motif loci on reads will be called.', type=str, required=True)
     
     guppy_required.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
-    
-    guppy_parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
     
     guppy_required.add_argument("--input", help='Path to POD5/FAST5 file or folder containing POD5/FAST5 files. If folder provided, then POD5/FAST5 files will be recusrviely searched', type=str, required=True)
     
@@ -71,14 +73,6 @@ if __name__ == '__main__':
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)
     
     
-    
-    annotate_parser = main_subparsers.add_parser("annotate", parents=[grand_parent_parser],
-                                      add_help=True,
-                                      description="Annotate BAM file with per-read calls",
-                                      help="Annotate BAM file with per-read calls",  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    annotate_parser.add_argument("--bam", help='Path to bam file  used in detect-guppy command.', type=str, required=True)
-    annotate_parser.add_argument("--per_read_file", help='Path to per-read calls pdocued by detect-guppy command.', type=str, required=True)
-    
     if len(sys.argv)==1:
         parser.print_help()
         parser.exit()
@@ -88,10 +82,6 @@ if __name__ == '__main__':
         if sys.argv[1]=='merge':
             merge_parser.print_help()
             merge_parser.exit()
-            
-        elif sys.argv[1]=='annotate':
-            annotate_parser.print_help()
-            annotate_parser.exit()
         
         elif sys.argv[1]=='detect-guppy':
             guppy_parser.print_help()
@@ -128,13 +118,8 @@ if __name__ == '__main__':
                 read_pred_file_list=[x.rstrip('\n') for x in file_list.readlines()]
         
         from src import modDetect
-        params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t}
+        params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t,'include_non_cpg_ref':args.include_non_cpg_ref, 'ref':args.ref}
         site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
-        
-    elif args.option=='annotate':
-        from src import modDetect
-        params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'bam':args.bam, 'per_read':args.per_read_file}
-        site_pred_file=modDetect.annotate(params)
         
     else:
         
@@ -142,7 +127,7 @@ if __name__ == '__main__':
         params={'input':args.input, 'output':args.output, 'threads':args.threads, 'prefix':args.prefix, 'window':10, 'model':args.model, 'basecaller':basecaller, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         
         if params['basecaller'] == 'guppy':
-            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary,  'mod_t':args.mod_t, 'unmod_t':args.unmod_t})
+            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary,  'mod_t':args.mod_t, 'unmod_t':args.unmod_t, 'include_non_cpg_ref':args.include_non_cpg_ref})
 
         elif params['basecaller'] == 'tombo':
             params.update({'tombo_group': args.tombo_group})
