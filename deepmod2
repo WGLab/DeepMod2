@@ -51,6 +51,8 @@ if __name__ == '__main__':
     guppy_parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
     
     guppy_parser.add_argument("--fast5_move", help='Use move table from FAST5 file instead of BAM file. If this flag is set, specify a basecall group for FAST5 file using --guppy_group parameter and ensure that the FAST5 files contains move table.', default=False, action='store_true')
+    
+    guppy_parser.add_argument("--skip_per_site", help='Skip per site output', default=False, action='store_true')
 
     
     tombo_parser = main_subparsers.add_parser("detect-tombo", parents=[parent_parser],
@@ -119,7 +121,7 @@ if __name__ == '__main__':
         
         from src import modDetect
         params={'output':args.output, 'prefix':args.prefix, 'threads':args.threads, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 'unmod_t':args.unmod_t,'include_non_cpg_ref':args.include_non_cpg_ref, 'ref':args.ref}
-        site_pred_file=modDetect.per_site_detect(read_pred_file_list, params)
+        site_pred_file=modDetect.get_per_site(params, read_pred_file_list, data_from_text=True)
         
     else:
         
@@ -127,7 +129,7 @@ if __name__ == '__main__':
         params={'input':args.input, 'output':args.output, 'threads':args.threads, 'prefix':args.prefix, 'window':10, 'model':args.model, 'basecaller':basecaller, 'qscore_cutoff':args.qscore_cutoff, 'length_cutoff':args.length_cutoff}
         
         if params['basecaller'] == 'guppy':
-            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary,  'mod_t':args.mod_t, 'unmod_t':args.unmod_t, 'include_non_cpg_ref':args.include_non_cpg_ref})
+            params.update({'bam':args.bam, 'ref':args.ref ,'file_type':args.file_type, 'fast5_move':args.fast5_move, 'guppy_group':args.guppy_group, 'supplementary': args.supplementary,  'mod_t':args.mod_t, 'unmod_t':args.unmod_t, 'include_non_cpg_ref':args.include_non_cpg_ref, 'skip_per_site':args.skip_per_site})
 
         elif params['basecaller'] == 'tombo':
             params.update({'tombo_group': args.tombo_group})

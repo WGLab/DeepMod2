@@ -1,6 +1,7 @@
 from subprocess import PIPE, Popen
 import os, shutil, pysam
 import numpy as np
+from dataclasses import dataclass, field
 
 model_dict={'guppy_hg1_R9.4':{'path':'models/guppy/guppy_r9.4/guppy_hg1_r9.4.h5', 
                              'help':'Model trained on chr1 of R9.4.1 NA12878 Guppy v5 basecalled FAST5 files from Nanopore WGS Consortium. Bisulphite methylation calls from two replicates (ENCFF279HCL, ENCFF835NTC) from ECNODE project were used as ground truth for training.'}, 
@@ -87,3 +88,107 @@ def get_per_read_stats(per_read):
             per_read_stats[rname][1].append(max(0,np.round(256*score-1).astype(int)))
             per_read_stats[rname][2].append(int(line[2]))
     return per_read_stats
+
+@dataclass
+class modCounts:
+    unmod: int=0
+    mod: int=0
+    total: int=0
+    score: float = 0.0
+    
+    def __add__(self, other):
+        return modCounts(self.unmod+other.unmod, self.mod+other.mod,self.total+other.total, self.score+other.score)
+    
+    def append(self, mod_score):
+        if mod_score>=mod_threshold:
+            self.mod+=1
+            self.total+=1
+        
+        elif mod_score<unmod_threshold:
+            self.unmod+=1
+            self.total+=1
+    
+    def stats(self):    
+        return [self.total, self.mod, self.unmod, self.mod/self.total if self.total>0 else 0]
+    
+@dataclass
+class modCounts:
+    unmod: int=0
+    mod: int=0
+    total: int=0
+     
+    def __add__(self, other):
+        return modCounts(self.unmod+other.unmod, self.mod+other.mod,self.total+other.total)
+    
+    def append(self, mod):
+        if mod:
+            self.mod+=1
+            self.total+=1
+        
+        else:
+            self.unmod+=1
+            self.total+=1
+    
+    def stats(self):    
+        return [self.total, self.mod, self.unmod, self.mod/self.total if self.total>0 else 0]
+    
+@dataclass
+class phase_modCounts:
+    
+    forward: modCounts=field(default_factory=modCounts)
+    reverse: modCounts()=field(default_factory=modCounts)
+    
+    def __add__(self, other):
+        return phase_modCounts(self.forward+other.forward, self.reverse+other.reverse)
+        
+    def append(self, per_read_pred):
+        mod, strand = per_read_pred
+        
+        if strand=='+':
+            self.forward.append(mod)
+            
+        else:
+            self.reverse.append(mod)
+            
+    def agg(self):
+        return self.forward+self.reverse
+            
+@dataclass
+class CpG:
+    chrom: str
+    position: int
+    is_ref_cpg: bool
+            
+    phase_1: phase_modCounts = field(default_factory=phase_modCounts)
+    phase_2: phase_modCounts = field(default_factory=phase_modCounts)
+    unphased: phase_modCounts = field(default_factory=phase_modCounts)
+
+    def get_all_phases(self):
+        return self.phase_1+self.phase_2+self.unphased
+        
+    def append(self, per_read_pred):
+        mod, strand, hp = per_read_pred
+
+        if hp==0:
+            self.unphased.append((mod, strand))
+        elif hp==1:
+            self.phase_1.append((mod, strand))
+        elif hp==2:
+            self.phase_2.append((mod, strand))
+            
+    def get_stats_string(self, aggregate=True):
+        
+        if aggregate:
+            stats=[self.chrom, self.position, self.position+2, self.is_ref_cpg]+self.get_all_phases().agg().stats() + self.phase_1.agg().stats() + self.phase_2.agg().stats()
+            stats_string='\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in stats)
+            
+            return stats[4], stats_string
+        
+        else:
+            fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
+            fwd_stats_string = '\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in fwd_stats)
+            
+            rev_stats=[self.chrom, self.position+1, self.position+2, '-', self.is_ref_cpg]+self.get_all_phases().reverse.stats() + self.phase_1.reverse.stats() + self.phase_2.reverse.stats()
+            rev_stats_string = '\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in rev_stats)
+            
+            return ((fwd_stats[5], fwd_stats_string), (rev_stats[5], rev_stats_string))

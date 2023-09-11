@@ -95,9 +95,20 @@ def get_candidates(read_seq, align_data, ref_pos_dict):
         c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
         cg_id=np.array([[m.start(0),-1] for m in re.finditer(r'CG', read_seq)])
         return (c_id, cg_id)
+
+def per_site_info(data):
+    # unmod, mod, score
+    try:
+        cov=data[0]+data[1]
+        mod_p=data[1]/cov
+        mean_score=score/cov
+        
+        return cov, mod_p, mean_score
+    
+    except:
+        return 0, 0, 0
     
 def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
-    include_non_cpg_ref=params['include_non_cpg_ref']
     header=pysam.AlignmentHeader.from_dict(header_dict)
 
     output=params['output']
@@ -106,17 +117,26 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
 
     
     per_site_file_path=os.path.join(output,'%s.per_site' %params['prefix'])
+    agg_per_site_file_path=os.path.join(output,'%s.per_site.aggregated' %params['prefix'])
     qscore_cutoff=params['qscore_cutoff']
     length_cutoff=params['length_cutoff']
-    mod_t=params['mod_t']
-    unmod_t=params['unmod_t']
+    
+    mod_threshold=params['mod_t']
+    unmod_threshold=params['unmod_t']
+    
+    skip_per_site=params['skip_per_site']
     
     per_site_pred={}
     
     counter=0
     
+    cpg_ref_only=not params['include_non_cpg_ref']
+    
+    ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items()} if cpg_ref_only else None
+       
+        
     with open(per_read_file_path,'w') as per_read_file:
-        per_read_file.write('read_name\tchromosome\tposition\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\n')
+        per_read_file.write('read_name\tchromosome\tref_position_before\tref_position\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\tread_phase\tref_cpg\n')
         
         
         with pysam.AlignmentFile(bam_output, "wb", header=header) as outf:
@@ -126,50 +146,66 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                 else:
                     try:
                         res = output_Q.get(block=False)
-                        counter+=1
+                        
                         if counter%10000==0:
                             print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
                         if res[0]:
                             _, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list = res
                             for read_data, candidate_list, MM, ML, pred_list in zip(*res[1:]):
+                                counter+=1
                                 read_dict, read_info = read_data
                                 read=pysam.AlignedSegment.from_dict(read_dict,header)
                                 if MM:
                                     read.set_tag('MM',MM,value_type='Z')
                                     read.set_tag('ML',ML)
+                                    
+                                outf.write(read)
+                                
                                 read_name=read_dict['name']
                                 is_forward, chrom, read_length, mean_qscore=read_info
                                 chrom=chrom if chrom else 'NA'
                                 strand='+' if is_forward else '-'
                                 
+                                phase=read.get_tag('HP') if read.has_tag('HP') else 0
+                                
+                                if float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
+                                    continue
+                                    
                                 for i in range(len(pred_list)):
                                     read_pos=candidate_list[i][0]+1
                                     ref_pos=candidate_list[i][1]
                                     score=pred_list[i]
                                     
-                                    ref_pos_str=str(ref_pos+1) if ref_pos!=-1 else 'NA'
+                                    ref_pos_str_before=str(ref_pos) if ref_pos!=-1 else 'NA'
+                                    ref_pos_str_after=str(ref_pos+1) if ref_pos!=-1 else 'NA'
                                     
-                                    if ref_pos_str=='NA' or float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
+                                    zero_based_fwd_pos=ref_pos if is_forward else ref_pos-1
+                                    
+                                    is_ref_cpg=False
+                                    
+                                    if ref_pos_str_before=='NA':    
                                         pass
+                                    
                                     else:
-                                        if (chrom, ref_pos_str, strand) not in per_site_pred:
-                                            # unmod, mod, score
-                                            per_site_pred[(chrom, ref_pos_str, strand)]=[0,0,0]
+                                        if cpg_ref_only:
+                                            is_ref_cpg = (strand=='+' and zero_based_fwd_pos in ref_pos_set_dict[chrom]) or (strand=='-' and zero_based_fwd_pos in ref_pos_set_dict[chrom])
+                                        if score<mod_threshold and score>unmod_threshold:
+                                            pass
+                                        elif not skip_per_site:
+                                            mod=score>=mod_threshold
+                                            
+                                            if (chrom, zero_based_fwd_pos) not in per_site_pred:
+                                                per_site_pred[(chrom, zero_based_fwd_pos)]=CpG(chrom, zero_based_fwd_pos, is_ref_cpg)
 
-                                        if score>=mod_t:
-                                            per_site_pred[(chrom, ref_pos_str, strand)][1]+=1
-                                            per_site_pred[(chrom, ref_pos_str, strand)][2]+=float(score)
+                                            per_site_pred[(chrom, zero_based_fwd_pos)].append((mod, strand, phase))
 
-                                        elif score<unmod_t:
-                                            per_site_pred[(chrom, ref_pos_str, strand)][0]+=1
-                                            per_site_pred[(chrom, ref_pos_str, strand)][2]+=score
-                                        
-                                    per_read_file.write('%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\n' %(read_name, chrom, ref_pos_str, read_pos, strand, score,mean_qscore, read_length))
+                                    per_read_file.write('%s\t%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\t%d\t%s\n' %(read_name, chrom, ref_pos_str_before, ref_pos_str_after, read_pos, strand, score, mean_qscore, read_length, phase, is_ref_cpg))
                         
-                                outf.write(read)
+                                
                         else:
                             _, total_read_info=res
                             for read_dict in total_read_info:
+                                counter+=1
                                 read=pysam.AlignedSegment.from_dict(read_dict,header)
                                 outf.write(read)
                                 
@@ -177,33 +213,55 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                         pass    
     
     print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
-    print('%s: Finished Per-Read Methylation Output. Starting Per-Site output.' %str(datetime.datetime.now()), flush=True)
-    
-    if include_non_cpg_ref:
-        ref_pos_set_dict=None
-    else:
-        ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items()}
-        
-    with open(per_site_file_path, 'w') as per_site_file:
-        per_site_file.write('#chromosome\tposition_before\tposition\tmethylation_percentage\tstrand\ttotal_coverage\tmethylation_percentage\tmean_methylation_probability\n')
-        for x,y in per_site_pred.items():
-            tot_cov=y[0]+y[1]
-            chrom, pos, strand= x[0], int(x[1]), x[2]
-            if tot_cov>0:
-                if include_non_cpg_ref:
-                    pass
-                else:
-                    if (strand=='+' and pos-1 not in ref_pos_set_dict[chrom]) or (strand=='-' and pos-2 not in ref_pos_set_dict[chrom]):
-                        continue
-                p=y[2]/tot_cov
-                per_site_file.write('%s\t%d\t%d\t%.4f\t%s\t%d\t%d\t%.4f\n' %(chrom, pos-1, pos, y[1]/tot_cov, strand, tot_cov, y[1], p))
-    
-    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
-    
+    print('%s: Finished Per-Read Methylation Output. Starting Per-Site output.' %str(datetime.datetime.now()), flush=True)        
     print('%s: Modification Tagged BAM file: %s' %(str(datetime.datetime.now()),bam_output), flush=True)
     print('%s: Per Read Prediction file: %s' %(str(datetime.datetime.now()), per_read_file_path), flush=True)
-    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+    print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)    
+    
+    if skip_per_site:
+        return 
+    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+                 'coverage','mod_coverage', 'unmod_coverage','mod_percentage',
+                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_percentage_phase1',
+                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_percentage_phase2']
+    per_site_header='\t'.join(per_site_fields)
+    per_site_fields.remove('strand')
+    agg_per_site_header='\t'.join(per_site_fields)
+    
+    per_site_file_path=os.path.join(params['output'],'%s.per_site' %params['prefix'])
+    agg_per_site_file_path=os.path.join(params['output'],'%s.per_site.aggregated' %params['prefix'])
+        
+    with open(per_site_file_path, 'w') as per_site_file, open(agg_per_site_file_path,'w') as agg_per_site_file:
+        per_site_file.write(per_site_header)
+        agg_per_site_file.write(agg_per_site_header)
 
+        for x in sorted(per_site_pred.keys()):
+            chrom, pos=x
+            cpg=per_site_pred[x]
+            
+            if cpg_ref_only and cpg.is_ref_cpg==False:
+                continue
+                
+            total_phases=cpg.get_all_phases()
+            phase_1=cpg.phase_1
+            phase_2=cpg.phase_2
+
+            fwd_stats, rev_stats=cpg.get_stats_string(aggregate=False)
+            agg_stats=cpg.get_stats_string()
+
+            if agg_stats[0]>0:
+                agg_per_site_file.write('\n'+agg_stats[1])
+
+            if fwd_stats[0]>0:
+                per_site_file.write('\n'+fwd_stats[1])
+
+            if rev_stats[0]>0:
+                per_site_file.write('\n'+rev_stats[1])
+    
+    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
+    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+    print('%s: Aggregated Per Site Prediction file: %s' %(str(datetime.datetime.now()), agg_per_site_file_path), flush=True)
+    
     return
 
 def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
