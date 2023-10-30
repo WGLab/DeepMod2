@@ -1,17 +1,32 @@
 from subprocess import PIPE, Popen
-import os, shutil, pysam
+import os, shutil, pysam, sys, datetime
 import numpy as np
-from dataclasses import dataclass, field
+from numba import jit
+import torch
+from itertools import repeat
+import pysam
+from .models import *
+import torch.nn.utils.prune as prune
+from tqdm import tqdm
 
-model_dict={'guppy_hg1_R9.4':{'path':'models/guppy/guppy_r9.4/guppy_hg1_r9.4.h5', 
-                             'help':'Model trained on chr1 of R9.4.1 NA12878 Guppy v5 basecalled FAST5 files from Nanopore WGS Consortium. Bisulphite methylation calls from two replicates (ENCFF279HCL, ENCFF835NTC) from ECNODE project were used as ground truth for training.'}, 
-            'guppy_R9.4.1':{'path':'models/guppy/guppy_r9.4/guppy_hg2_r9.4.1.h5',
-                                'help':'Model trained on chr1 of HG002 R9.4.1 Guppy v6 basecalled FAST5 files and bisulfite methylation calls from Oxford Nanoporetech release.'},
-            'tombo_R9.4.1':{'path':'models/tombo/tombo_r9.4.1/model.30-0.9407.h5',
-                             'help': 'Model trained on Tombo resquiggled R9.4.1 FAST5 files using positive and negative 5mC methylation E. coli and NA12878 control samples from Simpson (Nat Methods 2017), as well as Tombo resquiggled FAST5 files from chr1 of NA12878 from Nanopore WGS Consortium. Bisulphite methylation calls from two replicates (ENCFF279HCL, ENCFF835NTC) from ECNODE project were used as ground truth for training.'},
-            'guppy_R10.4.1': {'path':'models/guppy/guppy_r10.4.1/guppy_hg2_r10.4.1.h5',
-                              'help': 'Model trained on chr1 of HG002 R10.4.1 Guppy v6 basecalled FAST5 files and bisulfite methylation calls from Oxford Nanoporetech Q20+ data release.'}
-           }
+model_dict={
+    
+    'bilstm_r9.4.1' : {       'path' : 'models/bilstm/R9.4.1',
+                               'help':'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
+                               'model_type':'bilstm'},
+    
+    'bilstm_r10.4.1_4khz': {  'path' : 'models/bilstm/R10.4.1_4kHz',
+                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling',
+                              'model_type':'bilstm'},
+    
+    'transformer_r9.4.1' : {  'path' : 'models/transformer/R9.4.1',
+                              'help':'Transformer model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
+                              'model_type':'transformer'},
+    
+    'transformer_r10.4.1_4khz': { 'path' : 'models/transformer/R10.4.1_4kHz',
+                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling',
+                                  'model_type':'transformer'},    
+}
 
 comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
 
@@ -24,171 +39,267 @@ def get_model_help():
         print('%d) Model Name: %s' %(n+1, model))
         print('Details: %s\n' %model_dict[model]['help'])
         
-def get_model(model):
-    if model in model_dict:
+def get_model(params):
+    model_name=params['model']
+    
+    if model_name in model_dict:
         dirname = os.path.dirname(__file__)
-        return os.path.join(dirname, model_dict[model]['path'])
+        model_info=model_dict[model_name]
+        model_type = model_info['model_type']
+        model_path = os.path.join(dirname,model_info['path'])
         
-    elif os.path.exists(model):
-        return model
+        if model_type=='bilstm':
+            model = BiLSTM(model_dims=(21,10), num_layers=2, \
+                         dim_feedforward=128, num_fc=128);
+
+            checkpoint = torch.load(model_path,  map_location ='cpu')
+            model.load_state_dict(checkpoint['model_state_dict'])
+
+            if not params['disable_pruning']:
+                module=model.classifier.fc
+                prune.l1_unstructured(module, name="weight", amount=0.95)
+                prune.remove(module, 'weight')
+            
+            return model
+
+        elif model_type=='transformer':
+            model = TransformerModel(model_dims=(21,10), num_layers=4, nhead=8, \
+                         dim_feedforward=256, pe_dim=64, num_fc=128);
+
+            checkpoint = torch.load(model_path,  map_location ='cpu')
+            model.load_state_dict(checkpoint['model_state_dict'])
+
+            if not params['disable_pruning']:
+                module=model.classifier.fc
+                prune.l1_unstructured(module, name="weight", amount=0.5)
+                prune.remove(module, 'weight')
+                for l in model.transformer_encoder.layers:
+                    module=l.linear1
+                    prune.l1_unstructured(module, name="weight", amount=0.25)
+                    prune.remove(module, 'weight')
+                    module=l.linear2
+                    prune.l1_unstructured(module, name="weight", amount=0.25)
+                    prune.remove(module, 'weight')
+                    module=l.self_attn.out_proj
+                    prune.l1_unstructured(module, name="weight", amount=0.25)
+                    prune.remove(module, 'weight')
+                    
+            return model
+        else:
+            return model_path
      
     else:
-        return None
-    
-    
-def run_cmd(cmd, verbose=False, output=False,error=False):
-    stream=Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
-    stdout, stderr = stream.communicate()
-    
-    stdout=stdout.decode('utf-8')
-    stderr=stderr.decode('utf-8')
-    
-    if stderr:
-        print(stderr, flush=True)
-    
-    if verbose:
-        print(stdout, flush=True)
-        
-        
-    if output:
-        return stdout
-    if error:
-        return stderr
+        print('Model: %s not found.' %params['model'], flush=True)
+        sys.exit(2)
 
-
-def split_array(a, n=2048):
-    for i in range(a.shape[0] // n):
-        yield a[n*i:n*(i+1)]
-        
-def split_list(l,n=1000):
-    i=0    
-    chunk = l[i*n:(i+1)*n]
-    while chunk:
-        yield chunk
-        i+=1
-        chunk = l[i*n:(i+1)*n]
-        
-def get_attr(f,suffix):
-    keys = []
-    f.visit(lambda key : keys.append(f[key].attrs[suffix]) if suffix in f[key].attrs else None)
-    
-    return keys[0]        
-
-def get_per_read_stats(per_read):
-    per_read_stats={}
-    
-    with open(per_read,'r') as file:
-        file.readline()
-        for line in file:
-            line=line.rstrip('\n').split()
-            rname, read_position, score= line[0], int(line[3]), float(line[5])
-            if rname not in per_read_stats:
-                per_read_stats[rname]=[[],[],[]]
-            per_read_stats[rname][0].append(read_position-1)
-            per_read_stats[rname][1].append(max(0,np.round(256*score-1).astype(int)))
-            per_read_stats[rname][2].append(int(line[2]))
-    return per_read_stats
-
-@dataclass
-class modCounts:
-    unmod: int=0
-    mod: int=0
-    total: int=0
-    score: float = 0.0
-    
-    def __add__(self, other):
-        return modCounts(self.unmod+other.unmod, self.mod+other.mod,self.total+other.total, self.score+other.score)
-    
-    def append(self, mod_score):
-        if mod_score>=mod_threshold:
-            self.mod+=1
-            self.total+=1
-        
-        elif mod_score<unmod_threshold:
-            self.unmod+=1
-            self.total+=1
-    
-    def stats(self):    
-        return [self.total, self.mod, self.unmod, self.mod/self.total if self.total>0 else 0]
-    
-@dataclass
-class modCounts:
-    unmod: int=0
-    mod: int=0
-    total: int=0
-     
-    def __add__(self, other):
-        return modCounts(self.unmod+other.unmod, self.mod+other.mod,self.total+other.total)
-    
-    def append(self, mod):
-        if mod:
-            self.mod+=1
-            self.total+=1
-        
+def generate_batches(features, base_seq, ref_seq=None, batch_size=512):        
+        if len(ref_seq)==0:
+            ref_seq=(4+torch.zeros(features.shape[0], 21)).type(torch.LongTensor)       
         else:
-            self.unmod+=1
-            self.total+=1
-    
-    def stats(self):    
-        return [self.total, self.mod, self.unmod, self.mod/self.total if self.total>0 else 0]
-    
-@dataclass
-class phase_modCounts:
-    
-    forward: modCounts=field(default_factory=modCounts)
-    reverse: modCounts()=field(default_factory=modCounts)
-    
-    def __add__(self, other):
-        return phase_modCounts(self.forward+other.forward, self.reverse+other.reverse)
+            ref_seq=torch.Tensor(ref_seq).type(torch.LongTensor)
+            
+        features=torch.Tensor(features)
+        base_seq=torch.Tensor(base_seq).type(torch.LongTensor)
         
-    def append(self, per_read_pred):
-        mod, strand = per_read_pred
-        
-        if strand=='+':
-            self.forward.append(mod)
+        for local_index in range(0, features.shape[0], batch_size):
+            batch_x=features[local_index:(local_index + batch_size)]
+            batch_base_seq=base_seq[local_index:(local_index + batch_size)]
+            batch_ref_seq=ref_seq[local_index:(local_index + batch_size)]
+            
+            yield batch_x, batch_base_seq, batch_ref_seq
+
+@jit(nopython=True)
+def get_aligned_pairs(cigar_tuples, ref_start):
+    alen=np.sum(cigar_tuples[:,0])
+    pairs=np.zeros((alen,2)).astype(np.int32)
+
+    i=0
+    ref_cord=ref_start-1
+    read_cord=-1
+    pair_cord=0
+    for i in range(len(cigar_tuples)):
+        len_op, op= cigar_tuples[i,0], cigar_tuples[i,1]
+        if op==0:
+            for k in range(len_op):            
+                ref_cord+=1
+                read_cord+=1
+
+                pairs[pair_cord,0]=read_cord
+                pairs[pair_cord,1]=ref_cord
+                pair_cord+=1
+
+        elif op==2:
+            for k in range(len_op):            
+                read_cord+=1            
+                pairs[pair_cord,0]=read_cord
+                pairs[pair_cord,1]=-1
+                pair_cord+=1
+
+        elif op==1:
+            for k in range(len_op):            
+                ref_cord+=1            
+                pairs[pair_cord,0]=-1
+                pairs[pair_cord,1]=ref_cord
+                pair_cord+=1
+    return pairs
+
+@jit(nopython=True)
+def get_ref_to_num(x):
+    b=np.full((len(x)+1,2),fill_value=0,dtype=np.int8)
+    
+    for i,l in enumerate(x):
+        if l=='A':
+            b[i,0]=0
+            b[i,1]=3
+            
+        elif l=='T':
+            b[i,0]=3
+            b[i,1]=0
+            
+        elif l=='C':
+            b[i,0]=1
+            b[i,1]=2
+            
+        elif l=='G':
+            b[i,0]=2
+            b[i,1]=1
             
         else:
-            self.reverse.append(mod)
-            
-    def agg(self):
-        return self.forward+self.reverse
-            
-@dataclass
-class CpG:
-    chrom: str
-    position: int
-    is_ref_cpg: bool
-            
-    phase_1: phase_modCounts = field(default_factory=phase_modCounts)
-    phase_2: phase_modCounts = field(default_factory=phase_modCounts)
-    unphased: phase_modCounts = field(default_factory=phase_modCounts)
+            b[i,0]=4
+            b[i,1]=4
+    
+    b[-1,0]=4
+    b[-1,1]=4
+    
+    cg=np.where((b[:-1,0]==1)&(b[1:,1]==1))[0]
+    return b, cg
 
-    def get_all_phases(self):
-        return self.phase_1+self.phase_2+self.unphased
-        
-    def append(self, per_read_pred):
-        mod, strand, hp = per_read_pred
+def get_ref_info(args):
+    ref_path, chrom=args
+    ref_fasta=pysam.FastaFile(ref_path)
+    seq=ref_fasta.fetch(chrom).upper()
+    seq_array, pos_array=get_ref_to_num(seq)
+    return chrom, seq_array, pos_array
 
-        if hp==0:
-            self.unphased.append((mod, strand))
-        elif hp==1:
-            self.phase_1.append((mod, strand))
-        elif hp==2:
-            self.phase_2.append((mod, strand))
-            
-    def get_stats_string(self, aggregate=True):
+def get_stats_string(chrom, pos, is_ref_cpg, cpg):
+    unphased_rev_unmod, unphased_rev_mod, unphased_fwd_unmod, unphased_fwd_mod=cpg[0:4]
+    phase1_rev_unmod, phase1_rev_mod, phase1_fwd_unmod, phase1_fwd_mod=cpg[4:8]
+    phase2_rev_unmod, phase2_rev_mod, phase2_fwd_unmod, phase2_fwd_mod=cpg[8:12]
+    
+    fwd_mod=unphased_fwd_mod+phase1_fwd_mod+phase2_fwd_mod
+    fwd_unmod=unphased_fwd_unmod+phase1_fwd_unmod+phase2_fwd_unmod
+    fwd_total_stats=[fwd_mod+fwd_unmod,fwd_mod,fwd_unmod,fwd_mod/(fwd_mod+fwd_unmod) if fwd_mod+fwd_unmod>0 else 0]
+    fwd_phase1_stats=[phase1_fwd_mod+phase1_fwd_unmod, phase1_fwd_mod, phase1_fwd_unmod, phase1_fwd_mod/(phase1_fwd_mod+phase1_fwd_unmod) if phase1_fwd_mod+phase1_fwd_unmod>0 else 0]
+    fwd_phase2_stats=[phase2_fwd_mod+phase2_fwd_unmod, phase2_fwd_mod, phase2_fwd_unmod, phase2_fwd_mod/(phase2_fwd_mod+phase2_fwd_unmod) if phase2_fwd_mod+phase2_fwd_unmod>0 else 0]
+    
+    fwd_str='{}\t{}\t{}\t+\t{}\t'.format(chrom, pos, pos+1, is_ref_cpg)+'{}\t{}\t{}\t{:.4f}\t'.format(*fwd_total_stats) + '{}\t{}\t{}\t{:.4f}\t'.format(*fwd_phase1_stats) + '{}\t{}\t{}\t{:.4f}\n'.format(*fwd_phase2_stats)
+    
+    
+    rev_mod=unphased_rev_mod+phase1_rev_mod+phase2_rev_mod
+    rev_unmod=unphased_rev_unmod+phase1_rev_unmod+phase2_rev_unmod
+    rev_total_stats=[rev_mod+rev_unmod,rev_mod,rev_unmod,rev_mod/(rev_mod+rev_unmod) if rev_mod+rev_unmod>0 else 0]
+    rev_phase1_stats=[phase1_rev_mod+phase1_rev_unmod, phase1_rev_mod, phase1_rev_unmod, phase1_rev_mod/(phase1_rev_mod+phase1_rev_unmod) if phase1_rev_mod+phase1_rev_unmod>0 else 0]
+    rev_phase2_stats=[phase2_rev_mod+phase2_rev_unmod, phase2_rev_mod, phase2_rev_unmod, phase2_rev_mod/(phase2_rev_mod+phase2_rev_unmod) if phase2_rev_mod+phase2_rev_unmod>0 else 0]
+    
+    rev_str='{}\t{}\t{}\t-\t{}\t'.format(chrom, pos+1, pos+2, is_ref_cpg)+'{}\t{}\t{}\t{:.4f}\t'.format(*rev_total_stats) + '{}\t{}\t{}\t{:.4f}\t'.format(*rev_phase1_stats) + '{}\t{}\t{}\t{:.4f}\n'.format(*rev_phase2_stats)
+    
+    
+    agg_total_stats=[fwd_total_stats[0]+rev_total_stats[0], fwd_total_stats[1]+rev_total_stats[1], fwd_total_stats[2]+rev_total_stats[2], (fwd_total_stats[1]+rev_total_stats[1])/(fwd_total_stats[0]+rev_total_stats[0]) if fwd_total_stats[0]+rev_total_stats[0]>0 else 0]
+    
+    agg_phase1_stats=[fwd_phase1_stats[0]+rev_phase1_stats[0], fwd_phase1_stats[1]+rev_phase1_stats[1], fwd_phase1_stats[2]+rev_phase1_stats[2], (fwd_phase1_stats[1]+rev_phase1_stats[1])/(fwd_phase1_stats[0]+rev_phase1_stats[0]) if fwd_phase1_stats[0]+rev_phase1_stats[0]>0 else 0]
+    
+    agg_phase2_stats=[fwd_phase2_stats[0]+rev_phase2_stats[0], fwd_phase2_stats[1]+rev_phase2_stats[1], fwd_phase2_stats[2]+rev_phase2_stats[2], (fwd_phase2_stats[1]+rev_phase2_stats[1])/(fwd_phase2_stats[0]+rev_phase2_stats[0]) if fwd_phase2_stats[0]+rev_phase2_stats[0]>0 else 0]
+    
+    agg_str='{}\t{}\t{}\t{}\t'.format(chrom, pos, pos+2, is_ref_cpg)+'{}\t{}\t{}\t{:.4f}\t'.format(*agg_total_stats) + '{}\t{}\t{}\t{:.4f}\t'.format(*agg_phase1_stats) + '{}\t{}\t{}\t{:.4f}\n'.format(*agg_phase2_stats)
+    
+    return [(agg_total_stats[0], agg_str),(fwd_total_stats[0], fwd_str),(rev_total_stats[0], rev_str)]
+
+def get_per_site(params, input_list):
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
+    
+    mod_threshold=params['mod_t']
+    unmod_threshold=params['unmod_t']
+    
+    cpg_ref_only=not params['include_non_cpg_ref']
         
-        if aggregate:
-            stats=[self.chrom, self.position, self.position+2, self.is_ref_cpg]+self.get_all_phases().agg().stats() + self.phase_1.agg().stats() + self.phase_2.agg().stats()
-            stats_string='\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in stats)
-            
-            return stats[4], stats_string
+    print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+    
+    total_files=len(input_list)
+    print('%s: Reading %d files.' %(str(datetime.datetime.now()), total_files), flush=True)
+    pbar = tqdm(total=total_files)
+
+    per_site_pred={}
+
+    for read_pred_file in input_list:
+        with open(read_pred_file,'r') as read_file:
+            read_file.readline()
+            for line in read_file:
+                read, chrom, pos, pos_after, read_pos, strand, score, mean_qscore, sequence_length, phase, is_ref_cpg = line.rstrip('\n').split('\t')
+
+                if pos=='NA' or float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
+                    continue
+
+                score=float(score)
+
+                if score<mod_threshold and score>unmod_threshold:
+                    continue
+                else:
+                    mod=score>=mod_threshold 
+
+                pos=int(pos)
+                phase=int(phase)
+                is_forward=1 if strand=='+' else 0
+                
+                idx=4*phase+2*is_forward
+                
+                is_ref_cpg=True if is_ref_cpg =='True' else False
+                zero_based_fwd_pos=pos if strand=='+' else pos-1
+
+                if (chrom, zero_based_fwd_pos) not in per_site_pred:
+                    per_site_pred[(chrom, zero_based_fwd_pos)]=[0]*12+[is_ref_cpg]
+                
+                per_site_pred[(chrom, zero_based_fwd_pos)][idx+mod]+=1
+
+        pbar.update(1)
+    pbar.close()
+
+    print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)    
+    
+    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+                 'coverage','mod_coverage', 'unmod_coverage','mod_percentage',
+                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_percentage_phase1',
+                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_percentage_phase2']
+    per_site_header='\t'.join(per_site_fields)+'\n'
+    per_site_fields.remove('strand')
+    agg_per_site_header='\t'.join(per_site_fields)+'\n'
+    
+    per_site_file_path=os.path.join(params['output'],'%s.per_site' %params['prefix'])
+    agg_per_site_file_path=os.path.join(params['output'],'%s.per_site.aggregated' %params['prefix'])
         
-        else:
-            fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
-            fwd_stats_string = '\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in fwd_stats)
+    with open(per_site_file_path, 'w') as per_site_file, open(agg_per_site_file_path,'w') as agg_per_site_file:
+        per_site_file.write(per_site_header)
+        agg_per_site_file.write(agg_per_site_header)
+
+        for x in sorted(per_site_pred.keys()):
+            chrom, pos=x
+            cpg=per_site_pred[x]
+            is_ref_cpg=cpg[12]
             
-            rev_stats=[self.chrom, self.position+1, self.position+2, '-', self.is_ref_cpg]+self.get_all_phases().reverse.stats() + self.phase_1.reverse.stats() + self.phase_2.reverse.stats()
-            rev_stats_string = '\t'.join("{:.4}".format(x) if type(x)==float else  "{0}".format(x) for x in rev_stats)
+            if cpg_ref_only and is_ref_cpg==False:
+                continue
+            #fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
             
-            return ((fwd_stats[5], fwd_stats_string), (rev_stats[5], rev_stats_string))
+            agg_stats, fwd_stats, rev_stats=get_stats_string(chrom, pos, is_ref_cpg, cpg)
+            if agg_stats[0]>0:
+                agg_per_site_file.write(agg_stats[1])
+
+            if fwd_stats[0]>0:
+                per_site_file.write(fwd_stats[1])
+
+            if rev_stats[0]>0:
+                per_site_file.write(rev_stats[1])
+    
+    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
+    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+    print('%s: Aggregated Per Site Prediction file: %s' %(str(datetime.datetime.now()), agg_per_site_file_path), flush=True)

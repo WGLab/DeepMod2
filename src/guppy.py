@@ -5,7 +5,6 @@ import time, itertools, h5py, pysam
 import datetime, os, shutil, argparse, sys, re, array
 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import multiprocessing as mp
 import numpy as np
@@ -19,7 +18,9 @@ from numba import jit
 
 import queue
 import pod5 as p5
-        
+
+import torch
+
 @jit(nopython=True)
 def get_events(signal, move):
     stride, start, move_table=move
@@ -39,7 +40,7 @@ def get_events(signal, move):
         sig_end=move_index[i+1]*stride+start
         
         sig_len=sig_end-prev
-        data[i, 8]=sig_len
+        data[i, 8]=np.log10(sig_len)
         data[i, 4]=np.median(signal[prev:sig_end])
         data[i, 5]=np.median(np.abs(signal[prev:sig_end]-data[i, 4]))
         data[i, 6]=np.mean(signal[prev:sig_end])
@@ -54,12 +55,9 @@ def get_events(signal, move):
 
     return data
 
-def get_candidates(read_seq, align_data, ref_pos_dict):    
+def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):    
     if align_data[0]:
-        is_mapped, is_forward, ref_name, reference_start, reference_end, read_length, aligned_pairs=align_data
-        aligned_pairs=np.array(aligned_pairs)
-        aligned_pairs[aligned_pairs==None]=-1
-        aligned_pairs=aligned_pairs.astype(int)
+        is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
         
         c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
         cg_id=np.array([m.start(0) for m in re.finditer(r'CG', read_seq)])
@@ -69,8 +67,8 @@ def get_candidates(read_seq, align_data, ref_pos_dict):
         aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
 
         aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
-        aligned_pairs_read_wise=aligned_pairs[aligned_pairs[:,0]!=-1]
-
+        aligned_pairs_read_wise_original=aligned_pairs[aligned_pairs[:,0]!=-1]
+        aligned_pairs_read_wise=np.copy(aligned_pairs_read_wise_original)
         if not is_forward:
             aligned_pairs_ref_wise=aligned_pairs_ref_wise[::-1]
             aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
@@ -86,15 +84,15 @@ def get_candidates(read_seq, align_data, ref_pos_dict):
             merged=np.vstack((aligned_pairs_ref_wise, aligned_pairs_read_wise))
             _,ind=np.unique(merged[:,0], return_index=True)
             merged=merged[ind]
-            return c_id, merged
+            return c_id, merged, aligned_pairs_read_wise_original
         
         else:
-            return c_id, aligned_pairs_ref_wise
+            return c_id, aligned_pairs_ref_wise, aligned_pairs_read_wise_original
     
     else:
         c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
         cg_id=np.array([[m.start(0),-1] for m in re.finditer(r'CG', read_seq)])
-        return (c_id, cg_id)
+        return (c_id, cg_id, None)
 
 def per_site_info(data):
     # unmod, mod, score
@@ -110,6 +108,8 @@ def per_site_info(data):
     
 def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     header=pysam.AlignmentHeader.from_dict(header_dict)
+    
+    bam_threads=params['bam_threads']
 
     output=params['output']
     bam_output=os.path.join(output,'%s.bam' %params['prefix'])
@@ -132,22 +132,22 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     
     cpg_ref_only=not params['include_non_cpg_ref']
     
-    ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items()} if cpg_ref_only else None
+    ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items() if rname!='lock' } if cpg_ref_only else None
        
-        
+    counter_check=0
     with open(per_read_file_path,'w') as per_read_file:
         per_read_file.write('read_name\tchromosome\tref_position_before\tref_position\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\tread_phase\tref_cpg\n')
         
-        
-        with pysam.AlignmentFile(bam_output, "wb", header=header) as outf:
+        with pysam.AlignmentFile(bam_output, "wb", threads=bam_threads, header=header) as outf:
             while True:
                 if methylation_event.is_set() and output_Q.empty():
                     break
                 else:
                     try:
-                        res = output_Q.get(block=False)
-                        
-                        if counter%10000==0:
+                        res = output_Q.get(block=False, timeout=10)
+                        #continue
+                        if counter//10000>counter_check:
+                            counter_check=counter//10000
                             print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
                         if res[0]:
                             _, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list = res
@@ -164,9 +164,13 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                                 read_name=read_dict['name']
                                 is_forward, chrom, read_length, mean_qscore=read_info
                                 chrom=chrom if chrom else 'NA'
+                                
                                 strand='+' if is_forward else '-'
                                 
+                                phase=0
                                 phase=read.get_tag('HP') if read.has_tag('HP') else 0
+                                
+                                idx=4*phase+2*is_forward
                                 
                                 if float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
                                     continue
@@ -195,9 +199,9 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                                             mod=score>=mod_threshold
                                             
                                             if (chrom, zero_based_fwd_pos) not in per_site_pred:
-                                                per_site_pred[(chrom, zero_based_fwd_pos)]=CpG(chrom, zero_based_fwd_pos, is_ref_cpg)
-
-                                            per_site_pred[(chrom, zero_based_fwd_pos)].append((mod, strand, phase))
+                                                per_site_pred[(chrom, zero_based_fwd_pos)]=[0]*12+[is_ref_cpg]
+                                            
+                                            per_site_pred[(chrom, zero_based_fwd_pos)][idx+mod]+=1
 
                                     per_read_file.write('%s\t%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\t%d\t%s\n' %(read_name, chrom, ref_pos_str_before, ref_pos_str_after, read_pos, strand, score, mean_qscore, read_length, phase, is_ref_cpg))
                         
@@ -224,9 +228,9 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                  'coverage','mod_coverage', 'unmod_coverage','mod_percentage',
                  'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_percentage_phase1',
                  'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_percentage_phase2']
-    per_site_header='\t'.join(per_site_fields)
+    per_site_header='\t'.join(per_site_fields)+'\n'
     per_site_fields.remove('strand')
-    agg_per_site_header='\t'.join(per_site_fields)
+    agg_per_site_header='\t'.join(per_site_fields)+'\n'
     
     per_site_file_path=os.path.join(params['output'],'%s.per_site' %params['prefix'])
     agg_per_site_file_path=os.path.join(params['output'],'%s.per_site.aggregated' %params['prefix'])
@@ -238,25 +242,21 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
         for x in sorted(per_site_pred.keys()):
             chrom, pos=x
             cpg=per_site_pred[x]
+            is_ref_cpg=cpg[12]
             
-            if cpg_ref_only and cpg.is_ref_cpg==False:
+            if cpg_ref_only and is_ref_cpg==False:
                 continue
-                
-            total_phases=cpg.get_all_phases()
-            phase_1=cpg.phase_1
-            phase_2=cpg.phase_2
-
-            fwd_stats, rev_stats=cpg.get_stats_string(aggregate=False)
-            agg_stats=cpg.get_stats_string()
-
+            #fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
+            
+            agg_stats, fwd_stats, rev_stats=get_stats_string(chrom, pos, is_ref_cpg, cpg)
             if agg_stats[0]>0:
-                agg_per_site_file.write('\n'+agg_stats[1])
+                agg_per_site_file.write(agg_stats[1])
 
             if fwd_stats[0]>0:
-                per_site_file.write('\n'+fwd_stats[1])
+                per_site_file.write(fwd_stats[1])
 
             if rev_stats[0]>0:
-                per_site_file.write('\n'+rev_stats[1])
+                per_site_file.write(rev_stats[1])
     
     print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
     print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
@@ -264,117 +264,150 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     
     return
 
-def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
-    from tensorflow import keras
-    import tensorflow as tf
+def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
+    torch.set_grad_enabled(False);
     
-    gpus = tf.config.list_physical_devices('GPU')
-
-    if gpus:
-        try:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tf.config.list_logical_devices('GPU')
-        except RuntimeError as e:
-            # Memory growth must be set before GPUs have been initialized
-            print(e)
-
+    dev=params['dev']
+                
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
+    
+    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':3, 'P':4, 'B':4}
+    cigar_pattern = r'\d+[A-Za-z]'
+    
     window=10
-    model=keras.models.load_model(get_model(params['model']))
-    xla_fn = model if gpus else tf.function(model, jit_compile=True)
-    chunk_size=2048 #params['chunk_size']
+    
+    model=get_model(params)
+    
+    model.eval()
+    model.to(dev);
+    
+    reads_per_round=100
+    
+    chunk_size=256 if dev=='cpu' else params['batch_size']
     
     total_candidate_list=[]
     total_feature_list=[]
+    total_base_seq_list=[]
     total_MM_list=[]
     total_read_info=[]
     total_c_idx=[]
     total_unprocessed_reads=[]
+    total_ref_seq_list=[]
     r_count=0
+    
+    dummy_ref_seq=4+np.zeros(21)
+    
+    ref_available=True if params['ref'] else False
+    
     while True:
         if (signal_Q.empty() and input_event.is_set()):
             break
         
         try:
-            data=signal_Q.get(block=False)
             
-            signal, move, read_dict, align_data=data
-            
-            fq=read_dict['seq']
-            qual=read_dict['qual']
-            sequence_length=len(fq)
-            reverse=16 & int(read_dict['flag'])
-            fq=revcomp(fq) if reverse else fq
-            qual=qual[::-1] if reverse else qual
+            chunk=signal_Q.get(block=False, timeout=10)
+            #print('%s:  Output_qsize=%d   Signal_qsize=%d' %(str(datetime.datetime.now()), output_Q.qsize(), signal_Q.qsize()),flush=True)
+            if output_Q.qsize()>200:
+                time.sleep(30)
+                if output_Q.qsize()>500:
+                    time.sleep(60)
+                print('Pausing output due to queue size limit. Output_qsize=%d   Signal_qsize=%d' %(output_Q.qsize(), signal_Q.qsize()), flush=True)
+            for data in chunk:
+                signal, move, read_dict, align_data=data
 
-            pos_list_c, pos_list_candidates=get_candidates(fq, align_data, ref_pos_dict)
+                is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
 
-            pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
-                                                    &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
+                fq=read_dict['seq']
+                qual=read_dict['qual']
+                sequence_length=len(fq)
+                reverse= not is_forward
+                fq=revcomp(fq) if reverse else fq
+                qual=qual[::-1] if reverse else qual
 
-            if len(pos_list_candidates)==0:
-                total_unprocessed_reads.append(read_dict)
-                continue
-                
-            if not move[0]:
-                try:
-                    tags={x.split(':')[0]:x for x in read_dict['tags']}
-                    start=int(tags['ts'].split(':')[-1])
-                    mv=tags['mv'].split(',')
+                if is_mapped and ref_available:
+                    cigar_tuples = np.array([(int(x[:-1]), cigar_map[x[-1]]) for x in re.findall(cigar_pattern, read_dict['cigar'])])
+                    ref_start=int(read_dict['ref_pos'])-1
+                    aligned_pairs=get_aligned_pairs(cigar_tuples, ref_start)
+                else:
+                    aligned_pairs=None
 
-                    stride=int(mv[1])
-                    move_table=np.array([int(x) for x in mv[2:]])
-                    move=(stride, start, move_table)
-                except KeyError:
-                    print('Read:%s no move table or stride or signal start found' %read_name)
+
+                pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict)
+
+                pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
+                                                        &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
+
+                if len(pos_list_candidates)==0:
                     total_unprocessed_reads.append(read_dict)
                     continue
-                    
-            base_seq=[base_map[x] for x in fq]
-            base_seq=np.eye(4)[base_seq]
-            base_qual=10.0**(-np.array([ord(q)-33 for q in qual])/10)[:,np.newaxis]
-            mean_qscore=-10*np.log10(np.mean(base_qual))
-            mat=get_events(signal, move)
-            mat=np.array(mat)
-            mat=np.hstack((mat, base_qual, base_seq))
-            
-            try:
-                c_idx=[True if x in pos_list_c else False for x in pos_list_candidates[:,0]]
-                c_idx_count=np.vectorize(pos_list_c.get)(pos_list_candidates[c_idx,0])
-                c_idx_count[1:]=c_idx_count[1:]-c_idx_count[:-1]-1
-                MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
-                total_c_idx.append(c_idx)
-                total_MM_list.append(MM)
-            
-            except ValueError:
-                total_c_idx.append([])
-                total_MM_list.append(None)
-            
-            features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
 
-            total_candidate_list.append(pos_list_candidates)
-            total_feature_list.append(features)
+                if not move[0]:
+                    try:
+                        tags={x.split(':')[0]:x for x in read_dict.pop('tags')}
+                        start=int(tags['ts'].split(':')[-1])
+                        mv=tags['mv'].split(',')
+
+                        stride=int(mv[1])
+                        move_table=np.fromiter(mv[2:], dtype=np.int8)
+                        move=(stride, start, move_table)
+                        read_dict['tags']=[x for x in tags.values() if x[:2] not in ['mv', 'ts', 'ML', 'MM']]
+                    except KeyError:
+                        print('Read:%s no move table or stride or signal start found' %read_dict['name'])
+                        total_unprocessed_reads.append(read_dict)
+                        continue
+
+                base_seq=np.array([base_map[x] for x in fq])
+                base_qual=10**((33-np.array([ord(x) for x in qual]))/10)
+                mean_qscore=-10*np.log10(np.mean(base_qual))
+                base_qual=(1-base_qual)[:,np.newaxis]
+
+                if is_mapped and ref_available and not params['exclude_ref_features']:
+                    ref_seq=ref_seq_dict[ref_name][:,1][read_to_ref_pairs[:, 1]][::-1] if reverse else ref_seq_dict[ref_name][:,0][read_to_ref_pairs[:, 1]]
+                    per_site_ref_seq=np.array([ref_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                else:
+                    per_site_ref_seq=np.array([dummy_ref_seq for candidate in pos_list_candidates])
+
+                mat=get_events(signal, move)
+                mat=np.hstack((mat, base_qual))
+
+                try:
+                    c_idx=[True if x in pos_list_c else False for x in pos_list_candidates[:,0]]
+                    c_idx_count=np.vectorize(pos_list_c.get)(pos_list_candidates[c_idx,0])
+                    c_idx_count[1:]=c_idx_count[1:]-c_idx_count[:-1]-1
+                    MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
+                    total_c_idx.append(c_idx)
+                    total_MM_list.append(MM)
+
+                except ValueError:
+                    total_c_idx.append([])
+                    total_MM_list.append(None)
+
+                per_site_features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                per_site_base_seq=np.array([base_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+
+                total_candidate_list.append(pos_list_candidates)
+                total_feature_list.append(per_site_features)
+                total_base_seq_list.append(per_site_base_seq)
+                total_ref_seq_list.append(per_site_ref_seq)
+
+                total_read_info.append((read_dict, [align_data[1],align_data[2],align_data[5], mean_qscore]))
             
-            total_read_info.append((read_dict, [align_data[1],align_data[2],align_data[5], mean_qscore]))
-            
-            
-            if len(total_read_info)>100:
+            if len(total_read_info)>=reads_per_round:
                 read_counts=np.cumsum([len(x) for x in total_feature_list])[:-1]
                 features_list=np.vstack(total_feature_list)
-                features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
+                base_seq_list=np.vstack(total_base_seq_list)
+                ref_seq_list=np.vstack(total_ref_seq_list)
+                
+                pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, ref_seq=ref_seq_list, batch_size = chunk_size)]
 
-                pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
-                if features_list.shape[0]%chunk_size:
-                    pred_list.append(model(features_list[-1*(features_list.shape[0]%chunk_size):]).numpy())
-
+                                
                 pred_list=np.vstack(pred_list)
                 pred_list=np.split(pred_list.ravel(), read_counts)
                 read_qual_list=[array.array('B',np.round(255*read_pred_list[c_idx]).astype(int)) for read_pred_list, c_idx in zip(pred_list, total_c_idx)]
 
                 output_Q.put([True, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list])
-                total_candidate_list, total_feature_list, total_MM_list, total_read_info, total_c_idx=[], [], [], [], []
+                total_candidate_list, total_feature_list, total_base_seq_list, total_MM_list, total_read_info, total_c_idx=[], [], [], [], [], []
+                total_ref_seq_list=[]
                 
             if len(total_unprocessed_reads)>100:
                 output_Q.put([False, total_unprocessed_reads])
@@ -386,16 +419,13 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
     if len(total_read_info)>0:
         read_counts=np.cumsum([len(x) for x in total_feature_list])[:-1]
         features_list=np.vstack(total_feature_list)
-        features_list[:,:,8]=features_list[:,:,8]/np.sum(features_list[:,:,8],axis=1)[:, np.newaxis]
-
-        pred_list=[xla_fn(chunk).numpy() for chunk in split_array(features_list,chunk_size)]
-        if features_list.shape[0]%chunk_size:
-            pred_list.append(model(features_list[-1*(features_list.shape[0]%chunk_size):]).numpy())
+        base_seq_list=np.vstack(total_base_seq_list)
+        ref_seq_list=np.vstack(total_ref_seq_list)
+        
+        pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, ref_seq=ref_seq_list, batch_size = chunk_size)]
 
         pred_list=np.vstack(pred_list)
-
         pred_list=np.split(pred_list.ravel(), read_counts)
-
         read_qual_list=[array.array('B',np.round(255*read_pred_list[c_idx]).astype(int)) for read_pred_list, c_idx in zip(pred_list, total_c_idx)]
 
         output_Q.put([True, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list])
@@ -405,7 +435,12 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event):
 
     return
 
-def get_input(params, signal_Q, output_Q, input_event):    
+def get_input(params, signal_Q, output_Q, input_event):   
+    chrom_list=params['chrom_list']
+    length_cutoff=params['length_cutoff']
+    
+    skip_unmapped=params['skip_unmapped']
+    
     bam=params['bam']
     bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
     
@@ -417,44 +452,57 @@ def get_input(params, signal_Q, output_Q, input_event):
     input_=params['input']
     signal_files= [input_] if os.path.isfile(input_) else Path(input_).rglob("*.%s" %params['file_type'])
 
+    chunk=[]
+    
+    reads_per_chunk=100
+    
     if params['file_type']=='fast5':
         guppy_group=params['guppy_group']
         for filename in signal_files:
             with get_fast5_file(filename, mode="r") as f5:
                 for read in f5.get_reads():
-                    if signal_Q.qsize()>10000:
-                        time.sleep(10)
+                    if signal_Q.qsize()>200:
+                        time.sleep(20)
+                        #print('Pausing input due to INPUT queue size limit. Signal_qsize=%d' %(signal_Q.qsize()), flush=True)
                     read_name=read.read_id
-                    signal=read.get_raw_data()
-                    
-                    if params['fast5_move']:
-                        segment=read.get_analysis_attributes(guppy_group)['segmentation']
-                        start=read.get_analysis_attributes('%s/Summary/segmentation' %segment)['first_sample_template']
-                        stride=read.get_summary_data(guppy_group)['basecall_1d_template']['block_stride']
-                        move_table=read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')
-                        move=(stride, start, move_table)
-                    else:
-                        move=(None,None,None)
-                        
+                    non_primary_reads=[]
                     try:
                         read_iter=bam_index.find(read_name)
-                        non_primary_reads=[]
-                        for read in read_iter:
-                            read_dict=read.to_dict()
-                            if not (read.is_supplementary or read.is_secondary):
-                                read_dict=read.to_dict()
-                                align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
-                                data=(signal, move, read_dict, align_data)
-                                signal_Q.put(data)
+                        for bam_read in read_iter:
+                            if (params['ref'] and bam_read.is_mapped and bam_read.reference_name not in chrom_list)\
+                            or bam_read.query_length < length_cutoff \
+                            or (bam_read.is_mapped==False and skip_unmapped==True):
+                                continue
+                            
+                            elif not (bam_read.is_supplementary or bam_read.is_secondary):
+                                read_dict=bam_read.to_dict()
+                                signal=read.get_raw_data()
+                                
+                                if params['fast5_move']:
+                                    segment=read.get_analysis_attributes(guppy_group)['segmentation']
+                                    start=read.get_analysis_attributes('%s/Summary/segmentation' %segment)['first_sample_template']
+                                    stride=read.get_summary_data(guppy_group)['basecall_1d_template']['block_stride']
+                                    move_table=read.get_analysis_dataset('%s/BaseCalled_template' %guppy_group, 'Move')
+                                    move=(stride, start, move_table)
+                                else:
+                                    move=(None,None,None)
+                                
+                                align_data=(bam_read.is_mapped if params['ref'] else False, 
+                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length)
+                                data=(signal, move, read_dict, align_data)                                
+                                chunk.append(data)
+                                if len(chunk)>=reads_per_chunk:
+                                    signal_Q.put(chunk)
+                                    chunk=[]
                             
                             else:
-                                non_primary_reads.append(read_dict)
+                                pass
+                                #non_primary_reads.append(read_dict)
                         
                         if len(non_primary_reads)>0:
                             output_Q.put([False, non_primary_reads])
                         
                     except KeyError:
-                        print('Read:%s not found in BAM file' %read_name)
                         continue
                     
     else:
@@ -462,48 +510,84 @@ def get_input(params, signal_Q, output_Q, input_event):
         for filename in signal_files:
             with p5.Reader(filename) as reader:
                 for read in reader.reads():
-                    if signal_Q.qsize()>10000:
-                        time.sleep(10)
+                    if signal_Q.qsize()>200:
+                        time.sleep(20)
+                        print('Pausing input due to INPUT queue size limit. Signal_qsize=%d' %(signal_Q.qsize()), flush=True)
                         
                     read_name=str(read.read_id)
-                    signal=read.signal
+                    non_primary_reads=[]
                     try:
                         read_iter=bam_index.find(read_name)
-                        non_primary_reads=[]
-                        for read in read_iter:
-                            read_dict=read.to_dict()
-                            if not (read.is_supplementary or read.is_secondary):
-                                read_dict=read.to_dict()
-                                align_data=(read.is_mapped if params['ref'] else False, read.is_forward, read.reference_name, read.reference_start, read.reference_end, read.query_length, read.aligned_pairs)
+                        for bam_read in read_iter:
+                            
+                            if (params['ref'] and bam_read.is_mapped and bam_read.reference_name not in chrom_list)\
+                            or bam_read.query_length < length_cutoff \
+                            or (bam_read.is_mapped==False and skip_unmapped==True):
+                                continue
+                            
+                            elif not (bam_read.is_supplementary or bam_read.is_secondary):
+                                read_dict=bam_read.to_dict()
+                                signal=read.signal
+                                align_data=(bam_read.is_mapped if params['ref'] else False, 
+                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length)
                                 data=(signal, move, read_dict, align_data)
-                                signal_Q.put(data)
+                                chunk.append(data)
+                                if len(chunk)>=reads_per_chunk:
+                                    signal_Q.put(chunk)
+                                    chunk=[]
                             
                             else:
-                                non_primary_reads.append(read_dict)
+                                pass
+                                #non_primary_reads.append(read_dict)
                         
                         if len(non_primary_reads)>0:
                             output_Q.put([False, non_primary_reads])
                             
                     except KeyError:
-                        print('Read:%s not found in BAM file' %read_name)
+                        #print('Read:%s not found in BAM file' %read_name, flush=True)
                         continue
+    
+    if len(chunk)>0:
+        signal_Q.put(chunk)
+        chunk=[]
+        
+    if len(non_primary_reads)>0:
+        output_Q.put([False, non_primary_reads])
+            
     input_event.set()
     return
     
-def call_manager(params):        
+def call_manager(params):
+    print('%s: Starting Per Read Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+    if params['dev']!='cpu':
+        torch.multiprocessing.set_start_method('spawn')
+    
+    torch.set_num_threads(1)
+    
+    pmanager = mp.Manager()
+    
     bam=params['bam']
     bam_file=pysam.AlignmentFile(bam,'rb',check_sq=False)
     header_dict=bam_file.header.to_dict()
     
     print('%s: Getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
-    if params['ref']:
-        ref_fasta=pysam.FastaFile(params['ref'])
-        ref_pos_dict={rname:np.array([m.start(0) for m in re.finditer(r'CG', ref_fasta.fetch(rname).upper())]) for rname in ref_fasta.references}    
-    else:
-        ref_pos_dict={}
+    
+    ref_seq_dict={}
+    ref_pos_dict={}
+    
+    _=get_ref_to_num('ACGT')
+    if params['ref'] and len(params['chrom_list'])>0:
+        with mp.Pool(processes=params['threads']) as pool:
+            res=pool.map(get_ref_info, zip(repeat(params['ref']), params['chrom_list']))
+            for r in res:
+                chrom, seq_array, pos_array=r
+                ref_seq_dict[chrom]=seq_array
+                ref_pos_dict[chrom]=pos_array
+    
+    res=None
+    
     print('%s: Finished getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     
-    pmanager = mp.Manager()
     signal_Q = pmanager.Queue()
     output_Q = pmanager.Queue()
     methylation_event=pmanager.Event()
@@ -513,20 +597,26 @@ def call_manager(params):
     
     input_process = mp.Process(target=get_input, args=(params, signal_Q, output_Q, input_event))
     input_process.start()
-    handlers.append(input_process)
-    
-    for hid in range(max(1,params['threads']-1)):
-        p = mp.Process(target=process, args=(params, ref_pos_dict, signal_Q, output_Q, input_event));
-        p.start();
-        handlers.append(p);
     
     output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict, ref_pos_dict));
     output_process.start();
     
+    for hid in range(max(1,params['threads']-1)):
+        p = mp.Process(target=process, args=(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict));
+        p.start();
+        handlers.append(p);    
+    
+    input_process.join()
+    print('%s:Reading inputs complete.' %str(datetime.datetime.now()), flush=True)   
+
     for job in handlers:
         job.join()
     
     methylation_event.set()
+    
+    print('%s: Model predictions complete. Wrapping up output.' %str(datetime.datetime.now()), flush=True)   
+    
     output_process.join()
     
     return
+
