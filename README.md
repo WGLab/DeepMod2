@@ -1,5 +1,5 @@
 # DeepMod2
-DeepMod2 is a computational tool for detecting DNA methylation and modifications from Oxford Nanopore reads. It uses a BiLSTM model to predict per-read and per-site 5mC methylations for CpG sites. DeepMod2 can call methylation from POD5 and FAST5 files basecalled with Guppy or Dorado, as well as FAST5 files resquiggled with Tombo. DeepMod2 
+DeepMod2 is a computational tool for detecting DNA methylation and modifications from Oxford Nanopore reads. It uses a BiLSTM model to predict per-read and per-site 5mC methylations for CpG sites. DeepMod2 can call methylation from POD5 and FAST5 files basecalled with Guppy or Dorado. DeepMod2 
 now supports 5mC methylation calling from R10.4.1 flowcells, and allows annotation of BAM files with methylation tags.
 
 <p align="center"> <img src="https://github.com/WGLab/DeepMod2/assets/35819083/e0ef0b41-a469-427d-abaa-af2ba6292809"  width="50%" > </p>
