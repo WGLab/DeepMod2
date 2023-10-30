@@ -145,7 +145,7 @@ if __name__ == '__main__':
             for k in vars(args):
                 file.write('{}: {}\n'.format(k,vars(args)[k]) )
 
-        from src import guppy
-        guppy.call_manager(params)
+        from src import detect
+        detect.call_manager(params)
     
     print('\n%s: Time elapsed=%.4fs' %(str(datetime.datetime.now()),time.time()-t), flush=True)
