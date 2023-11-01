@@ -1,6 +1,5 @@
 # DeepMod2
-DeepMod2 is a computational tool for detecting DNA methylation and modifications from Oxford Nanopore reads. It uses a BiLSTM model to predict per-read and per-site 5mC methylations for CpG sites. DeepMod2 can call methylation from POD5 and FAST5 files basecalled with Guppy or Dorado. DeepMod2 
-now supports 5mC methylation calling from R10.4.1 flowcells, and allows annotation of BAM files with methylation tags.
+DeepMod2 is a computational tool for detecting DNA 5mC methylation from Oxford Nanopore reads. It uses a BiLSTM model to predict per-read and per-site 5mC methylations for CpG sites and produces a methylation tagged BAM file. DeepMod2 can call methylation from POD5 and FAST5 files basecalled with Guppy or Dorado and provides models for R10.4.1 and R9.4.1 flowcells.
 
 <p align="center"> <img src="https://github.com/WGLab/DeepMod2/assets/35819083/e0ef0b41-a469-427d-abaa-af2ba6292809"  width="50%" > </p>
 
@@ -11,23 +10,37 @@ Please refer to [Installation](https://github.com/WGLab/DeepMod2/blob/main/docs/
 
 ## Usage
 Quick usage guide:
-1. Basecall your FAST5/POD5 files with Guppy or Dorado using `--bam_out --moves_out` parameters to get a BAM file with move tables, e.g.
+1. Basecall your FAST5/POD5 files with Dorado (using `--emit-moves`) or Guppy (using `--bam_out --moves_out`) parameters to get a BAM file with move tables:
    ```
-   guppy_basecaller -i INPUT_DIR -s BASECALL_DIR --bam_out --moves_out -c model.cfg
+   dorado basecaller MODEL INPUT_DIR --emit-moves > basecall.bam
    ```
-   Make sure to use the appropriate Guppy/Dorado model for your sequencing kit, but do not select a model with modification calling. You can supply a reference genome to Guppy/Dorado to get aligned BAM files, or use minimap2 to align these BAM files later.
-2. Merge BAM files using samtools:
+   Make sure to use the appropriate Guppy/Dorado model for your sequencing kit. You can supply a reference genome to Guppy/Dorado to get aligned BAM files, or use minimap2 to align these BAM files later.
+2. (Optional but recommended) Align basecalled reads to a reference genome while retaining the move tables:
    ```
-   find BASECALL_DIR \( -path "*/pass/*" -o -path "*/fail/*" \) -type f -name "*.bam"|samtools cat -b - -o BASECALL_DIR/merged.bam
+   samtools fastq basecall.bam -T mv,ts | minimap2 -ax map-ont ref.fa - -y -t NUM_THREADS |samtools view -o aligned.bam
    ```
-3. Run DeepMod2 by providing the folder with FAST5 or POD5 signal files and BAM file as input. You can provide reference FASTA file if the BAM file is aligned to get reference anchored methylation calls. Use multiple cores and/or GPUs for speedup.
+3. Run DeepMod2 by providing BAM file and the folder containing FAST5 or POD5 signal files as inputs. You can provide reference FASTA file to get reference anchored methylation calls and per-site frequencies if the BAM file is aligned. Specify the model you want to use and the file type of raw signal files. Use multiple cores and/or GPUs for speedup.
+   
+   a) If using an aligned BAM file input:
    ```
-   python PATH_TO_DEEPMOD2_REPOSITORY/deepmod2 detect --bam BASECALL_DIR/merged.bam --input INPUT_DIR --threads NUM_THREADS --ref REF.fa --output MOD_CALLS
+   python PATH_TO_DEEPMOD2_REPOSITORY/deepmod2 detect --bam reads.bam --input INPUT_DIR --model MODEL --file_type FILE_TYPE --threads NUM_THREADS --ref ref.fa --output MOD_CALLS
+   ```
+   
+   b) If using an unaligned BAM file input:
+   ```
+   python PATH_TO_DEEPMOD2_REPOSITORY/deepmod2 detect --bam reads.bam --input INPUT_DIR --model MODEL --file_type FILE_TYPE --threads NUM_THREADS --output MOD_CALLS
    ```
    This will give you a per-read prediction text file `MOD_CALLS/output.per_read`, a per-site prediction file `MOD_CALLS/output.per_site`, a per-site prediction file with both strands aggregated `MOD_CALLS/output.per_site.aggregated`, and a methylation annotated BAM file `MOD_CALLS/output.bam`.
-4. Visualize the annotated BAM in IGV file after sorting and indexing the BAM file produced by DeepMod2. In IGV, select 'Color alignments by' and 'base modifications (5mC)'.
+5. Visualize the annotated BAM file produced by DeepMod2 in IGV file. In IGV, select 'Color alignments by' and 'base modifications (5mC)'. The following steps will allow you to open the tagged BAM file in IGV:
+
+   a) If an aligned BAM is given to DeepMod2, you only need to sort and index the DeepMod2 methylation tagged BAM file:
    ```
-   samtools sort MOD_CALLS/output.bam -o MOD_CALLS/output.sorted.bam --write-index
+   samtools sort MOD_CALLS/output.bam -o MOD_CALLS/final.bam --write-index
+   ```
+
+   b) If an unaligned BAM is given to DeepMod2, first align the DeepMod2 methylation tagged BAM file (while preserving methylation tags MM and ML), then sort and index it:
+   ```
+   samtools fastq MOD_CALLS/output.bam -T MM,ML,mv,ts| minimap2 -ax map-ont ref.fa - -y -t NUM_THREADS |samtools sort -o MOD_CALLS/final.bam --write-index
    ```
    
 <p align="center"> <img src="https://github.com/WGLab/DeepMod2/assets/35819083/c693ab27-f218-4478-9780-c027f740999d"  width="75%" > </p>
