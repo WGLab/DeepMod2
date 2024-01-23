@@ -453,7 +453,7 @@ def get_input(params, signal_Q, output_Q, input_event):
     signal_files= [input_] if os.path.isfile(input_) else Path(input_).rglob("*.%s" %params['file_type'])
 
     chunk=[]
-    
+    non_primary_reads=[]
     reads_per_chunk=100
     
     if params['file_type']=='fast5':

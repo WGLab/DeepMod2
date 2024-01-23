@@ -12,5 +12,3 @@ conda activate deepmod2
 ```
 
 After installing, run `python DeepMod2/deepmod2 --help` to see the run options.
-
-The above method installs CPU version of tensorflow for DeepMod2. Using a GPU version of Tensorflow with a GPU can allow significantly speed-up. You can install tensorflow GPU version (>v2.0) that works with your GPU driver.
