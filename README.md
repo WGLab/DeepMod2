@@ -5,6 +5,8 @@ DeepMod2 is a computational tool for detecting DNA 5mC methylation from Oxford N
 
 DeepMod2 is distributed under the [MIT License by Wang Genomics Lab](https://wglab.mit-license.org/).
 
+### Citing DeepMod2
+Ahsan, M.U., Gouru, A., Chan, J. et al. A signal processing and deep learning framework for methylation detection using Oxford Nanopore sequencing. Nat Commun 15, 1448 (2024). https://doi.org/10.1038/s41467-024-45778-y
 ## Installation
 Please refer to [Installation](https://github.com/WGLab/DeepMod2/blob/main/docs/Install.md) for how to install DeepMod2.
 
@@ -50,4 +52,4 @@ Please refer to [Usage](https://github.com/WGLab/DeepMod2/blob/main/docs/Usage.m
 
 ## Examples
 
-Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) for a complete tutorial on how to run DeepMod2.
+Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) for a complete tutorial on how to run DeepMod2. A test dataset consisting of a small example of 100 reads in both POD5 and FAST5 format as well as the expected results in this release: https://github.com/WGLab/DeepMod2/releases/tag/v0.1.1.
