@@ -15,17 +15,34 @@ model_dict={
                                'help':'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
                                'model_type':'bilstm'},
     
-    'bilstm_r10.4.1_4khz': {  'path' : 'models/bilstm/R10.4.1_4kHz',
-                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling',
+    'bilstm_r10.4.1_4khz_v3.5': {  'path' : 'models/bilstm/R10.4.1_4kHz_v3.5',
+                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v3.5 Guppy/Dorado basecaller model.',
                               'model_type':'bilstm'},
+    
+        'bilstm_r10.4.1_4khz_v4.1': {  'path' : 'models/bilstm/R10.4.1_4kHz_v4.1',
+                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v4.1 Guppy/Dorado basecaller model.',
+                              'model_type':'bilstm'},
+    
+    'bilstm_r10.4.1_5khz_v4.3': {  'path' : 'models/bilstm/R10.4.1_5kHz_v4.3',
+                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
+                              'model_type':'bilstm'},
+    
     
     'transformer_r9.4.1' : {  'path' : 'models/transformer/R9.4.1',
                               'help':'Transformer model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
                               'model_type':'transformer'},
     
-    'transformer_r10.4.1_4khz': { 'path' : 'models/transformer/R10.4.1_4kHz',
-                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling',
+    'transformer_r10.4.1_4khz_v3.5': { 'path' : 'models/transformer/R10.4.1_4kHz_v3.5',
+                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v3.5 Guppy/Dorado basecaller model.',
                                   'model_type':'transformer'},    
+    
+        'transformer_r10.4.1_4khz_v4.1': { 'path' : 'models/transformer/R10.4.1_4kHz_v4.1',
+                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v4.1 Guppy/Dorado basecaller model.',
+                                  'model_type':'transformer'},    
+    
+        'transformer_r10.4.1_5khz_v4.3': { 'path' : 'models/transformer/R10.4.1_5kHz_v4.3',
+                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
+                                  'model_type':'transformer'}, 
 }
 
 comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
@@ -41,53 +58,66 @@ def get_model_help():
         
 def get_model(params):
     model_name=params['model']
+    model_type=None
+    model_path=None
     
     if model_name in model_dict:
         dirname = os.path.dirname(__file__)
         model_info=model_dict[model_name]
         model_type = model_info['model_type']
         model_path = os.path.join(dirname,model_info['path'])
-        
-        if model_type=='bilstm':
-            model = BiLSTM(model_dims=(21,10), num_layers=2, \
-                         dim_feedforward=128, num_fc=128);
+    
+    else:
+        try:
+            model_type_ = model_name.split(',')[0]
+            model_path_ = model_name.split(',')[1]
 
-            checkpoint = torch.load(model_path,  map_location ='cpu')
-            model.load_state_dict(checkpoint['model_state_dict'])
-
-            if not params['disable_pruning']:
-                module=model.classifier.fc
-                prune.l1_unstructured(module, name="weight", amount=0.95)
-                prune.remove(module, 'weight')
+            if os.path.isfile(model_path_) and model_type_ in ['bilstm','transformer']:
+                model_type = model_type_
+                model_path = model_path_
+                
+        except IndexError:
+            print('Incorrect model specified')
+            sys.exit(2)
             
-            return model
+    if model_type=='bilstm':
+        model = BiLSTM(model_dims=(21,10), num_layers=2, \
+                     dim_feedforward=128, num_fc=128);
 
-        elif model_type=='transformer':
-            model = TransformerModel(model_dims=(21,10), num_layers=4, nhead=8, \
-                         dim_feedforward=256, pe_dim=64, num_fc=128);
+        checkpoint = torch.load(model_path,  map_location ='cpu')
+        model.load_state_dict(checkpoint['model_state_dict'])
 
-            checkpoint = torch.load(model_path,  map_location ='cpu')
-            model.load_state_dict(checkpoint['model_state_dict'])
+        if not params['disable_pruning']:
+            module=model.classifier.fc
+            prune.l1_unstructured(module, name="weight", amount=0.95)
+            prune.remove(module, 'weight')
 
-            if not params['disable_pruning']:
-                module=model.classifier.fc
-                prune.l1_unstructured(module, name="weight", amount=0.5)
+        return model
+
+    elif model_type=='transformer':
+        model = TransformerModel(model_dims=(21,10), num_layers=4, nhead=8, \
+                     dim_feedforward=256, pe_dim=64, num_fc=128);
+
+        checkpoint = torch.load(model_path,  map_location ='cpu')
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+        if not params['disable_pruning']:
+            module=model.classifier.fc
+            prune.l1_unstructured(module, name="weight", amount=0.5)
+            prune.remove(module, 'weight')
+            for l in model.transformer_encoder.layers:
+                module=l.linear1
+                prune.l1_unstructured(module, name="weight", amount=0.25)
                 prune.remove(module, 'weight')
-                for l in model.transformer_encoder.layers:
-                    module=l.linear1
-                    prune.l1_unstructured(module, name="weight", amount=0.25)
-                    prune.remove(module, 'weight')
-                    module=l.linear2
-                    prune.l1_unstructured(module, name="weight", amount=0.25)
-                    prune.remove(module, 'weight')
-                    module=l.self_attn.out_proj
-                    prune.l1_unstructured(module, name="weight", amount=0.25)
-                    prune.remove(module, 'weight')
-                    
-            return model
-        else:
-            return model_path
-     
+                module=l.linear2
+                prune.l1_unstructured(module, name="weight", amount=0.25)
+                prune.remove(module, 'weight')
+                module=l.self_attn.out_proj
+                prune.l1_unstructured(module, name="weight", amount=0.25)
+                prune.remove(module, 'weight')
+
+        return model
+       
     else:
         print('Model: %s not found.' %params['model'], flush=True)
         sys.exit(2)
