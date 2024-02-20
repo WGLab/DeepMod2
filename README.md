@@ -50,6 +50,20 @@ Quick usage guide:
 
 Please refer to [Usage](https://github.com/WGLab/DeepMod2/blob/main/docs/Usage.md) for details on how to use DeepMod2.
 
+
+## Models
+The following models for 5mC detection in CpG motif are provided in the repository. Use `--model MODEL_NAME` to specify a model to use. You only need to provide the name of the model, not the path to it. Each model is compatible with a different Dorado or Guppy basecalling model version.
+|Model Architecture|DeepMod2 Model Name|Flowcell<BR>(Sampling Rate)| Compatible Dorado/Guppy Basecalling Model|
+|-|-|-|-|
+|BiLSTM|**bilstm_r10.4.1_5khz_v4.3**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.3.0**
+|Transformer|**transformer_r10.4.1_5khz_v4.3**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.3.0**
+|BiLSTM|**bilstm_r10.4.1_4khz_v4.1**|R10.4.1 (4kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.1.0** in Dorado<BR>**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup).cfg** in Guppy 6.5.7|
+|Transformer|**transformer_r10.4.1_4khz_v4.1**|R10.4.1 (4kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.1.0** in Dorado<BR>**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup).cfg** in Guppy 6.5.7|
+|BiLSTM|**bilstm_r10.4.1_4khz_v3.5**<BR>(Published in DeepMod2 paper)|R10.4.1 (4kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v3.5.2** in Dorado<BR>**dna_r10.4.1_e8.2_400bps_fast\|hac\|sup).cfg** in Guppy 6.3.8|
+|Transformer|**transformer_r10.4.1_4khz_v3.5**<BR>(Published in DeepMod2 paper)|R10.4.1 (4kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v3.5.2** in Dorado<BR>**dna_r10.4.1_e8.2_400bps_fast\|hac\|sup).cfg** in Guppy 6.3.8|
+|BiLSTM|**bilstm_r9.4.1**<BR>(Published in DeepMod2 paper)|R9.4.1 (4kHz)|**dna_r9.4.1_e8_(hac\|sup)@v3.3** in Dorado<BR>**dna_r9.4.1_450bps_(hac\|sup).cfg** in Guppy 6.3.8 and 6.5.7|
+|Transformer|**transformer_r9.4.1**<BR>(Published in DeepMod2 paper)|R9.4.1 (4kHz)|**dna_r9.4.1_e8_(hac\|sup)@v3.3** in Dorado<BR>**dna_r9.4.1_450bps_(hac\|sup).cfg** in Guppy 6.3.8 and 6.5.7|
+
 ## Examples
 
 Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) for a complete tutorial on how to run DeepMod2. A test dataset consisting of a small example of 100 reads in both POD5 and FAST5 format as well as the expected results in this release: https://github.com/WGLab/DeepMod2/releases/tag/v0.1.1.
