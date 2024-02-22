@@ -45,7 +45,7 @@ wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.39_GRC
 # Download POD5 files
 mkdir -p ${INPUT_DIR}/nanopore_raw_data
 
- ./${INPUT_DIR}/nanopore_raw_data
+wget -qO- URL| tar xzf - -C ${INPUT_DIR}/nanopore_raw_data
 ```
 
 ## Reference Anchored Methylation Calling
@@ -68,12 +68,17 @@ This will produce an aligned BAM file named `aligned.bam` under the `$OUTPUT_DIR
 
 It is possible to run Dorado basecaller without performing alignment. This can be helpful in speeding up basecalling process that requires the use of a GPU instance which can be expensive. It also allows you more flexibility in terms of how you want to perform alignment, with specific minimap2 parameters.
 
+#### Basecalling with Dorado
+
 ```
 # Perform basecalling
 ${INPUT_DIR}/dorado-0.5.3-linux-x64/bin/dorado basecaller --emit-moves --recursive ${INPUT_DIR}/dorado-0.5.3-linux-x64/models/dna_r10.4.1_e8.2_400bps_hac@v4.3.0  ${INPUT_DIR}/nanopore_raw_data > ${OUTPUT_DIR}/basecalled.bam
 ```
 
-This will produce an unaligned BAM file named `basecalled.bam` under the `$OUTPUT_DIR` folder. We will convert this BAM file into FASTQ format while keeping all the tags and pipe into minimap2 for alignment.
+This will produce an unaligned BAM file named `basecalled.bam` under the `$OUTPUT_DIR` folder. 
+
+#### Alignment with minimap2
+We will convert this BAM file into FASTQ format while keeping all the tags and pipe into minimap2 for alignment.
 
 ```
 # Align using minimap2 while copying move table information
@@ -94,7 +99,7 @@ samtools sort ${OUTPUT_DIR}/aligned.bam -o ${OUTPUT_DIR}/aligned.sorted.bam
 samtools index ${OUTPUT_DIR}/aligned.sorted.bam
 
 #Run NanoCaller to phase the reads
-NanoCaller --bam ${OUTPUT_DIR}/aligned.sorted.bam --ref ${INPUT_DIR}/GRCh38.fa --mode snps --phase --output ${OUTPUT_DIR}/deepmod2/nanocaller
+NanoCaller --bam ${OUTPUT_DIR}/aligned.sorted.bam --ref ${INPUT_DIR}/GRCh38.fa --mode snps --phase --output ${OUTPUT_DIR}/nanocaller --wgs_contigs chr1-22XY --cpu 8 
 
  # Merge phased reads into a single BAM file
 find ${OUTPUT_DIR}/nanocaller/intermediate_phase_files -type f -name '*bam'|samtools cat -b - -o ${OUTPUT_DIR}/phased.bam
@@ -107,7 +112,7 @@ Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` mode
 ```
 # Run DeepMod2
 BAM_INPUT=${OUTPUT_DIR}/phased.bam # Use ${OUTPUT_DIR}/aligned.bam if you did not use NanoCaller to phase the reads
-python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  ${OUTPUT_DIR}/phased.bam --input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa
+python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  ${OUTPUT_DIR}/phased.bam --input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa --threads 8
 ```
 The output folder of DeepMod2 `${OUTPUT_DIR}/deepmod2/` will contain the following files:
 ```
@@ -124,15 +129,15 @@ We will inspect contents of the per-read output file using `head ${OUTPUT_DIR}/d
 
 |read_name|chromosome|ref_position_before|ref_position|read_position|strand|methylation_score|mean_read_qscore|read_length|read_phase|ref_cpg|
 |-|-|-|-|-|-|-|-|-|-|-|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695583|2695584|122|-|0.0099|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695469|2695470|236|-|0.9967|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695467|2695468|238|-|0.9875|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695370|2695371|335|-|0.9831|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695351|2695352|354|-|0.9474|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695229|2695230|476|-|0.995|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2695135|2695136|570|-|0.9458|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2694799|2694800|905|-|0.0296|17.92|26261|1|TRUE|
-|2ac0ac0d-eee4-43fa-93e4-ee386023351c|chr11|2694764|2694765|938|-|0.749|17.92|26261|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733569|2733570|35|-|0.0036|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733457|2733458|146|-|0.9846|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733439|2733440|164|-|0.0048|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733362|2733363|242|-|0.2352|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733356|2733357|248|-|0.841|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733351|2733352|253|-|0.9893|18.05|48187|1|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733341|2733342|263|-|0.012|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733155|2733156|449|-|0.9858|18.05|48187|1|TRUE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|chr11|2733143|2733144|461|-|0.966|18.05|48187|1|TRUE|
 
 
 **Per-Site Output**
@@ -145,18 +150,18 @@ We will use `bedtools intersect` to inspect per-site methylation frequencies in 
 
 |#chromosome|position_before|position|strand|ref_cpg|coverage|mod_coverage|unmod_coverage|mod_percentage|coverage_phase1|mod_coverage_phase1|unmod_coverage_phase1|mod_percentage_phase1|coverage_phase2|mod_coverage_phase2|unmod_coverage_phase2|mod_percentage_phase2|
 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
-|chr11|2699031|2699032|+|TRUE|24|12|12|0.5|12|0|12|0|12|12|0|1|
-|chr11|2699032|2699033|-|TRUE|19|11|8|0.5789|8|0|8|0|11|11|0|1|
-|chr11|2699037|2699038|+|TRUE|24|12|12|0.5|12|0|12|0|12|12|0|1|
-|chr11|2699038|2699039|-|TRUE|19|11|8|0.5789|8|0|8|0|11|11|0|1|
-|chr11|2699048|2699049|+|TRUE|24|10|14|0.4167|12|0|12|0|12|10|2|0.8333|
-|chr11|2699049|2699050|-|TRUE|19|8|11|0.4211|8|0|8|0|11|8|3|0.7273|
-|chr11|2699099|2699100|+|TRUE|22|9|13|0.4091|12|0|12|0|10|9|1|0.9|
-|chr11|2699100|2699101|-|TRUE|19|11|8|0.5789|8|0|8|0|11|11|0|1|
-|chr11|2699101|2699102|+|TRUE|24|10|14|0.4167|12|0|12|0|12|10|2|0.8333|
+|chr11|2699031|2699032|+|TRUE|16|8|8|0.5|8|0|8|0|8|8|0|1|
+|chr11|2699032|2699033|-|TRUE|11|7|4|0.6364|4|0|4|0|7|7|0|1|
+|chr11|2699037|2699038|+|TRUE|16|8|8|0.5|8|0|8|0|8|8|0|1|
+|chr11|2699038|2699039|-|TRUE|11|7|4|0.6364|4|0|4|0|7|7|0|1|
+|chr11|2699048|2699049|+|TRUE|16|6|10|0.375|8|0|8|0|8|6|2|0.75|
+|chr11|2699049|2699050|-|TRUE|11|5|6|0.4545|4|0|4|0|7|5|2|0.7143|
+|chr11|2699099|2699100|+|TRUE|15|7|8|0.4667|8|0|8|0|7|7|0|1|
+|chr11|2699100|2699101|-|TRUE|11|7|4|0.6364|4|0|4|0|7|7|0|1|
+|chr11|2699101|2699102|+|TRUE|16|7|9|0.4375|8|0|8|0|8|7|1|0.875|
 
 
-**Per-Site Output**
+**Aggregated Per-Site Output**
 
 We will use `bedtools intersect` to inspect per-site methylation frequencies in chr11:2699000-2702000 imprinting control region from the per-site output file with aggregated CpG counts over +- strands:
 
@@ -166,18 +171,17 @@ We will use `bedtools intersect` to inspect per-site methylation frequencies in 
 
 |#chromosome|position_before|position|ref_cpg|coverage|mod_coverage|unmod_coverage|mod_percentage|coverage_phase1|mod_coverage_phase1|unmod_coverage_phase1|mod_percentage_phase1|coverage_phase2|mod_coverage_phase2|unmod_coverage_phase2|mod_percentage_phase2|
 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
-|chr11|2699031|2699033|TRUE|43|23|20|0.5349|20|0|20|0|23|23|0|1|
-|chr11|2699037|2699039|TRUE|43|23|20|0.5349|20|0|20|0|23|23|0|1|
-|chr11|2699048|2699050|TRUE|43|18|25|0.4186|20|0|20|0|23|18|5|0.7826|
-|chr11|2699099|2699101|TRUE|41|20|21|0.4878|20|0|20|0|21|20|1|0.9524|
-|chr11|2699101|2699103|TRUE|43|21|22|0.4884|20|0|20|0|23|21|2|0.913|
-|chr11|2699115|2699117|TRUE|43|22|21|0.5116|20|0|20|0|23|22|1|0.9565|
-|chr11|2699120|2699122|TRUE|43|23|20|0.5349|20|0|20|0|23|23|0|1|
-|chr11|2699180|2699182|TRUE|43|22|21|0.5116|20|0|20|0|23|22|1|0.9565|
-|chr11|2699187|2699189|TRUE|43|23|20|0.5349|20|0|20|0|23|23|0|1|
+|chr11|2699031|2699033|TRUE|27|15|12|0.5556|12|0|12|0|15|15|0|1|
+|chr11|2699037|2699039|TRUE|27|15|12|0.5556|12|0|12|0|15|15|0|1|
+|chr11|2699048|2699050|TRUE|27|11|16|0.4074|12|0|12|0|15|11|4|0.7333|
+|chr11|2699099|2699101|TRUE|26|14|12|0.5385|12|0|12|0|14|14|0|1|
+|chr11|2699101|2699103|TRUE|27|14|13|0.5185|12|0|12|0|15|14|1|0.9333|
+|chr11|2699115|2699117|TRUE|27|14|13|0.5185|12|0|12|0|15|14|1|0.9333|
+|chr11|2699120|2699122|TRUE|27|15|12|0.5556|12|0|12|0|15|15|0|1|
+|chr11|2699180|2699182|TRUE|27|15|12|0.5556|12|0|12|0|15|15|0|1|
+|chr11|2699187|2699189|TRUE|27|15|12|0.5556|12|0|12|0|15|15|0|1|
 
-
-These results show that phase 1 is completely unmodified whereas phase 2 is nearly completely modified which we expect for this imprinted region.
+These results show that phase 1 is completely unmodified (column mod_percentage_phase1) whereas phase 2 is nearly completely modified (mod_percentage_phase2), which is what we expect for this imprinted region.
 
 
 ### Visualizing DeepMod2 Methylation in IGV
@@ -189,4 +193,4 @@ samtools sort  ${OUTPUT_DIR}/deepmod2/output.bam -o ${OUTPUT_DIR}/deepmod2/outpu
 
 Open the BAM file `${OUTPUT_DIR}/deepmod2/output.sorted.bam` in IGV, select `Color alignments by base modificaition (5mC)`. If you used phased BAM file for methylation, you can select `Group alignments  by phase` to separate reads by haplotype. Go to the region `chr11:2699000-2702000` to see the following methylation tags:
 
-![image](https://github.com/WGLab/DeepMod2/assets/35819083/c95802e5-d841-4f0b-82bd-f2da5ffb97b6)
+![image](https://github.com/WGLab/DeepMod2/assets/35819083/b7e87a6c-9dda-4b31-be0e-93c13ecec1fb)
