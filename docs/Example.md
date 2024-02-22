@@ -1,6 +1,6 @@
 # DeepMod2 Run Example
 
-This example shows how to use DeepMod2 to prediction 5mC methylation from FAST5 files.
+This example shows how to use DeepMod2 to prediction 5mC methylation from FAST5 files. We will use sample dataset from https://github.com/WGLab/DeepMod2/releases/tag/v0.3.0.
 
 - [Methylation Calling from POD5 files with Dorado basecalling](Example.md#methylation-calling-from-pod5-files-with-dorado-basecalling)
    - [Reference Anchored Methylation Calling](Example.md#reference-anchored-methylation-calling)
@@ -45,7 +45,7 @@ wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.39_GRC
 # Download POD5 files
 mkdir -p ${INPUT_DIR}/nanopore_raw_data
 
-wget -qO- URL| tar xzf - -C ${INPUT_DIR}/nanopore_raw_data
+wget -qO- https://github.com/WGLab/DeepMod2/files/14368872/sample.pod5.tar.gz| tar xzf - -C ${INPUT_DIR}/nanopore_raw_data
 ```
 
 ## Reference Anchored Methylation Calling
