@@ -297,9 +297,9 @@ def get_per_site(params, input_list):
     print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)    
     
     per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
-                 'coverage','mod_coverage', 'unmod_coverage','mod_percentage',
-                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_percentage_phase1',
-                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_percentage_phase2']
+                 'coverage','mod_coverage', 'unmod_coverage','mod_fraction',
+                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_fraction_phase1',
+                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_fraction_phase2']
     per_site_header='\t'.join(per_site_fields)+'\n'
     per_site_fields.remove('strand')
     agg_per_site_header='\t'.join(per_site_fields)+'\n'
