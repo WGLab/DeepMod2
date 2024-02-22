@@ -66,4 +66,4 @@ The following models for 5mC detection in CpG motif are provided in the reposito
 
 ## Examples
 
-Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) for a complete tutorial on how to run DeepMod2. A test dataset consisting of a small example of 100 reads in both POD5 and FAST5 format as well as the expected results in this release: https://github.com/WGLab/DeepMod2/releases/tag/v0.1.1.
+Please refer to [Example](https://github.com/WGLab/DeepMod2/blob/main/docs/Example.md) for a complete tutorial on how to run DeepMod2 under various scenarios. A test dataset consisting of a small example of ~60 reads in both POD5 and FAST5 format as well as the expected results in this release:https://github.com/WGLab/DeepMod2/releases/tag/v0.3.0.
