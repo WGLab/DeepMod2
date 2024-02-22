@@ -8,10 +8,10 @@ This example shows how to use DeepMod2 to prediction 5mC methylation from FAST5 
      - [(Optional) Read Phasing for diploid genomes](Example.md#optional-read-phasing-for-diploid-genomes)
      - [Methylation Calling with DeepMod2](Example.md#methylation-calling-with-deepmod2)
      - [Visualizing DeepMod2 Methylation in IGV](Example.md#visualizing-deepmod2-methylation-in-igv)
-   - Reference free methylation calling
-     - Dorado Basecalling
-     - Methylation Calling with DeepMod2
-     - Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit
+   - [Reference free methylation calling](Example.md#reference-free-methylation-calling)
+     - [Dorado Basecalling ](Example.md#dorado-basecalling)
+     - [Methylation Calling with DeepMod2](Example.md#methylation-calling-with-deepmod2-1)
+     - [Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit](Example.md#optional-read-alignment-to-reference-genome-and-per-site-frequency-calculation-with-modkit)
 
 
 # Methylation Calling from POD5 files with Dorado basecalling
@@ -112,7 +112,7 @@ Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` mode
 ```
 # Run DeepMod2
 BAM_INPUT=${OUTPUT_DIR}/phased.bam # Use ${OUTPUT_DIR}/aligned.bam if you did not use NanoCaller to phase the reads
-python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  ${OUTPUT_DIR}/phased.bam --input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa --threads 8
+python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  $BAM_INPUT--input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa --threads 8
 ```
 The output folder of DeepMod2 `${OUTPUT_DIR}/deepmod2/` will contain the following files:
 ```
@@ -194,3 +194,85 @@ samtools sort  ${OUTPUT_DIR}/deepmod2/output.bam -o ${OUTPUT_DIR}/deepmod2/outpu
 Open the BAM file `${OUTPUT_DIR}/deepmod2/output.sorted.bam` in IGV, select `Color alignments by base modificaition (5mC)`. If you used phased BAM file for methylation, you can select `Group alignments  by phase` to separate reads by haplotype. Go to the region `chr11:2699000-2702000` to see the following methylation tags:
 
 ![image](https://github.com/WGLab/DeepMod2/assets/35819083/b7e87a6c-9dda-4b31-be0e-93c13ecec1fb)
+
+
+## Reference free methylation calling
+In order to perform reference free methylation calling, we will provide an unaligned BAM to DeepMod2. In this case, DeepMod2 will detect 5mC in all CpG motifs found on the read only and will not use reference sequence as a feature. In this case, per-read predictions will not be combined into a per-site methylation frequency, and methylation will be reported only in per-read output and BAM file.
+
+### Dorado Basecalling
+
+```
+# Perform basecalling
+${INPUT_DIR}/dorado-0.5.3-linux-x64/bin/dorado basecaller --emit-moves --recursive ${INPUT_DIR}/dorado-0.5.3-linux-x64/models/dna_r10.4.1_e8.2_400bps_hac@v4.3.0  ${INPUT_DIR}/nanopore_raw_data > ${OUTPUT_DIR}/basecalled.bam
+```
+
+This will produce an unaligned BAM file named `basecalled.bam` under the `$OUTPUT_DIR` folder. 
+
+### Methylation Calling with DeepMod2
+
+Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` model and use the unaligned BAM file and Nanopore signal files as input. In this situation, we will not provide the reference genome FASTA file as input.
+
+```
+# Run DeepMod2
+BAM_INPUT=${OUTPUT_DIR}/basecalled.bam
+python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  $BAM_INPUT --input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --threads 8
+```
+
+The output folder of DeepMod2 `${OUTPUT_DIR}/deepmod2/` will contain the following files:
+```
+args -> Shows the arguments and command use to run DeepMod2
+output.bam -> Unsorted methylation tagged BAM file
+output.per_read -> Per-read methylation calls in sorted BED file
+output.per_site -> Per-site methylation file will be empty.
+output.per_site.aggregated -> Aggregated Per-site methylation file will be empty. 
+```
+
+**Per-read Output**
+We will inspect contents of the per-read output file using `head ${OUTPUT_DIR}/deepmod2/output.per_read`:
+
+
+|read_name|chromosome|ref_position_before|ref_position|read_position|strand|methylation_score|mean_read_qscore|read_length|read_phase|ref_cpg|
+|-|-|-|-|-|-|-|-|-|-|-|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|35|+|0.0042|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|146|+|0.985|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|164|+|0.0057|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|242|+|0.36|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|248|+|0.9428|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|253|+|0.9935|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|263|+|0.0123|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|449|+|0.9866|18.12|48175|0|FALSE|
+|160f871b-f4c3-40de-a160-383fcd5033e7|NA|NA|NA|461|+|0.968|18.12|48175|0|FALSE|
+
+
+In this case the chromosome, position and strand information is not available since the reads were unaligned.
+
+### Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit
+The unaligned BAM file produced by DeepMod2 contains 5mC tags MM and ML for all CpG motifs in a read. Reads from this BAM file can be aligned to any reference genome and methylation counts for reads mapping to the same reference CpG sites can be obtained using [modkit](https://github.com/nanoporetech/modkit).
+
+```
+# Align reads using minimap2 and then sort and index the BAM file
+samtools fastq ${OUTPUT_DIR}/deepmod2/output.bam -T "*"|minimap2 -ax map-ont ${INPUT_DIR}/GRCh38.fa - -y|samtools sort -o ${OUTPUT_DIR}/deepmod2/aligned.sorted.bam --write-index
+
+modkit pileup ${OUTPUT_DIR}/deepmod2/aligned.sorted.bam  ${OUTPUT_DIR}/deepmod2/per_site_methylation.bed  --ref ${INPUT_DIR}/GRCh38.fa --preset traditional
+```
+
+Per-site frequency calculation of modkit will be stored in `${OUTPUT_DIR}/deepmod2/per_site_methylation.bed` file in the column format described [here](https://github.com/nanoporetech/modkit?tab=readme-ov-file#bedmethyl-column-descriptions). We will use `bedtools intersect` to inspect per-site methylation frequencies in chr11:2699000-2702000 imprinting control region from the per-site output file with aggregated CpG counts over +- strands:
+
+```
+printf 'chr11\t2699900\t27002000'|bedtools intersect -header -a ${OUTPUT_DIR}/deepmod2/per_site_methylation.bed  -b -|head
+```
+
+|chrom|start|end|code score|score|strand|start|end|color|N_valid_cov|fraction_modified|N_mod|N_canonical|N_other_mod|N_delete|N_fail|N_diff|N_nocall|
+|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
+|chr11|2699906|2699907|m|25|.|2699906|2699907|255,0,0|25|60|15|10|0|0|0|1|2|
+|chr11|2699915|2699916|m|27|.|2699915|2699916|255,0,0|27|55.56|15|12|0|0|0|0|1|
+|chr11|2699917|2699918|m|28|.|2699917|2699918|255,0,0|28|57.14|16|12|0|0|0|0|0|
+|chr11|2699927|2699928|m|27|.|2699927|2699928|255,0,0|27|55.56|15|12|0|0|0|0|1|
+|chr11|2699966|2699967|m|28|.|2699966|2699967|255,0,0|28|57.14|16|12|0|0|0|0|0|
+|chr11|2699976|2699977|m|27|.|2699976|2699977|255,0,0|27|55.56|15|12|0|0|1|0|0|
+|chr11|2699979|2699980|m|28|.|2699979|2699980|255,0,0|28|57.14|16|12|0|0|0|0|0|
+|chr11|2699981|2699982|m|28|.|2699981|2699982|255,0,0|28|57.14|16|12|0|0|0|0|0|
+|chr11|2699984|2699985|m|27|.|2699984|2699985|255,0,0|27|55.56|15|12|0|0|1|0|0|
+|chr11|2699988|2699989|m|27|.|2699988|2699989|255,0,0|27|55.56|15|12|0|0|1|0|0|
+
+Even though this result does not show haplotype specific methylation, we can see that the modified fraction is ~50-60% as expected.
