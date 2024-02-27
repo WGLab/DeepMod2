@@ -2,19 +2,23 @@
 
 This example shows how to use DeepMod2 to prediction 5mC methylation from FAST5 files. We will use sample dataset from https://github.com/WGLab/DeepMod2/releases/tag/v0.3.0.
 
-- [Methylation Calling from POD5 files with Dorado basecalling](Example.md#methylation-calling-from-pod5-files-with-dorado-basecalling)
-   - [Reference Anchored Methylation Calling](Example.md#reference-anchored-methylation-calling)
-     - [Dorado Basecalling and Read Alignment to Reference Genome](Example.md#dorado-basecalling-and-read-alignment-to-reference-genome)
-     - [(Optional) Read Phasing for diploid genomes](Example.md#optional-read-phasing-for-diploid-genomes)
-     - [Methylation Calling with DeepMod2](Example.md#methylation-calling-with-deepmod2)
-     - [Visualizing DeepMod2 Methylation in IGV](Example.md#visualizing-deepmod2-methylation-in-igv)
-   - [Reference free methylation calling](Example.md#reference-free-methylation-calling)
-     - [Dorado Basecalling ](Example.md#dorado-basecalling)
-     - [Methylation Calling with DeepMod2](Example.md#methylation-calling-with-deepmod2-1)
-     - [Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit](Example.md#optional-read-alignment-to-reference-genome-and-per-site-frequency-calculation-with-modkit)
-
-
-# Methylation Calling from POD5 files with Dorado basecalling
+- [1. Methylation Calling from POD5 files with Dorado basecalling](Example.md#1-methylation-calling-from-pod5-files-with-dorado-basecalling)
+   - [1.1 Reference Anchored Methylation Calling](Example.md#11-reference-anchored-methylation-calling)
+     - [1.1.1 Dorado Basecalling and Read Alignment to Reference Genome](Example.md#111-dorado-basecalling-and-read-alignment-to-reference-genome)
+     - [1.1.2 (Optional) Read Phasing for diploid genomes](Example.md#112-optional-read-phasing-for-diploid-genomes)
+     - [1.1.3 Methylation Calling with DeepMod2](Example.md#113-methylation-calling-with-deepmod2)
+     - [1.1.4 Visualizing DeepMod2 Methylation in IGV](Example.md#114-visualizing-deepmod2-methylation-in-igv)
+   - [1.2 Reference free methylation calling](Example.md#12-reference-free-methylation-calling)
+     - [1.2.1 Dorado Basecalling ](Example.md#121-dorado-basecalling)
+     - [1.2.2 Reference Free Methylation Calling with DeepMod2](Example.md#122-reference-free-methylation-calling-with-deepmod2)
+     - [1.2.3 Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit](Example.md#123-optional-read-alignment-to-reference-genome-and-per-site-frequency-calculation-with-modkit)
+- [2. Methylation Calling from FAST5 files with Guppy basecalling](Example.md#2-methylation-calling-from-fast5-files-with-guppy-basecalling)
+     - [2.1 Reference Anchored Methylation Calling](Example.md#21-reference-anchored-methylation-calling)
+        - [2.1.1 Guppy Basecalling and Read Alignment to Reference Genome](Example.md#211-guppy-basecalling-and-read-alignment-to-reference-genome)
+        - [2.1.2 Methylation Calling with DeepMod2 and Guppy Basecalling](Example.md#212-methylation-calling-with-deepmod2-and-guppy-basecalling)
+     - [2.2 Reference free methylation calling with Guppy Basecalling](Example.md#22-reference-free-methylation-calling-with-guppy-basecalling)
+     
+# 1. Methylation Calling from POD5 files with Dorado basecalling
 **Prepare Directories** 
 ```
 INPUT_DIR=data
@@ -48,13 +52,13 @@ mkdir -p ${INPUT_DIR}/nanopore_raw_data
 wget -qO- https://github.com/WGLab/DeepMod2/files/14368872/sample.pod5.tar.gz| tar xzf - -C ${INPUT_DIR}/nanopore_raw_data
 ```
 
-## Reference Anchored Methylation Calling
+## 1.1 Reference Anchored Methylation Calling
 In order to perform reference anchored methylation calling, we will provide an aligned BAM to DeepMod2. In this case, DeepMod2 will detect 5mC in all CpG motifs found on the read, as wel as any bases of the read that map to a reference CpG site. Finally, it will combine per-read predictions for a given reference CpG site into a per-site methylation frequency. Any unaligned reads or unaligned segments of the reads will also be analyzed for 5mC and reported in per-read output and BAM file, but would not be used in per-site frequency calculation. 
 
-### Dorado Basecalling and Read Alignment to Reference Genome
+### 1.1.1 Dorado Basecalling and Read Alignment to Reference Genome
 First we will perform basecalling of our nanopore signal file using Dorado basecaller. It is possible to align the reads during basecalling or align the reads after basecalling. Both options are shown below. Since we need move table for our basecalled DNA sequences, we will use `--emit-moves` while running Dorado, which will produce an aligned (Option A) or unaligned BAM file (Option B).
 
-**Option A: Perform Read Alignment during Bascalling with Dorado**
+#### Option A: Perform Read Alignment during Bascalling with Dorado
 
 Dorado has the option to perform read alignment using minimap2 during basecalling if a reference FASTA file is provided as `--reference` option. This can be be helpful in reducing the number of steps needed to run.
 
@@ -64,11 +68,11 @@ ${INPUT_DIR}/dorado-0.5.3-linux-x64/bin/dorado basecaller --emit-moves --recursi
 
 This will produce an aligned BAM file named `aligned.bam` under the `$OUTPUT_DIR` folder.
 
-**Option B: Perform Read Alignment after Bascalling with Dorado**
+#### Option B: Perform Read Alignment after Bascalling with Dorado
 
 It is possible to run Dorado basecaller without performing alignment. This can be helpful in speeding up basecalling process that requires the use of a GPU instance which can be expensive. It also allows you more flexibility in terms of how you want to perform alignment, with specific minimap2 parameters.
 
-#### Basecalling with Dorado
+**Basecalling with Dorado**
 
 ```
 # Perform basecalling
@@ -77,7 +81,8 @@ ${INPUT_DIR}/dorado-0.5.3-linux-x64/bin/dorado basecaller --emit-moves --recursi
 
 This will produce an unaligned BAM file named `basecalled.bam` under the `$OUTPUT_DIR` folder. 
 
-#### Alignment with minimap2
+**Alignment with minimap2**
+
 We will convert this BAM file into FASTQ format while keeping all the tags and pipe into minimap2 for alignment.
 
 ```
@@ -87,7 +92,7 @@ samtools fastq  ${OUTPUT_DIR}/basecalled.bam -T "*"|minimap2 -ax map-ont ${INPUT
 
 This will produce an aligned BAM file named `aligned.bam` under the `$OUTPUT_DIR` folder.
 
-### (Optional) Read Phasing for diploid genomes
+### 1.1.2 (Optional) Read Phasing for diploid genomes
 You can optionally use SNP calling and haplotyping tool such as NanoCaller or Clair3 to phase the BAM file into parental haplotypes. The phased BAM file can be provided as input to DeepMod2 instead of `${OUTPUT_DIR}/aligned.bam` to get haplotype specific methylation calls.
 
 ```
@@ -106,7 +111,7 @@ find ${OUTPUT_DIR}/nanocaller/intermediate_phase_files -type f -name '*bam'|samt
 
 ```
 
-### Methylation Calling with DeepMod2 
+### 1.1.3 Methylation Calling with DeepMod2 
 Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` model and use the aligned BAM file and Nanopore signal files as input. Since we want to perform reference anchored methylation calling, we will provide the reference genome FASTA file as input as well. We will use the phased BAM file from the previous step, but you can also use `${OUTPUT_DIR}/aligned.bam` BAM file if you do not want to get haplotype specific methylation calls.
 
 ```
@@ -184,7 +189,7 @@ We will use `bedtools intersect` to inspect per-site methylation frequencies in 
 These results show that phase 1 is completely unmodified (column mod_percentage_phase1) whereas phase 2 is nearly completely modified (mod_percentage_phase2), which is what we expect for this imprinted region.
 
 
-### Visualizing DeepMod2 Methylation in IGV
+### 1.1.4 Visualizing DeepMod2 Methylation in IGV
 Since the methylation tagged BAM file produced by DeepMod2 is not sorted, we will first sort and index it:
 
 ```
@@ -196,10 +201,10 @@ Open the BAM file `${OUTPUT_DIR}/deepmod2/output.sorted.bam` in IGV, select `Col
 ![image](https://github.com/WGLab/DeepMod2/assets/35819083/b7e87a6c-9dda-4b31-be0e-93c13ecec1fb)
 
 
-## Reference free methylation calling
+## 1.2 Reference free methylation calling
 In order to perform reference free methylation calling, we will provide an unaligned BAM to DeepMod2. In this case, DeepMod2 will detect 5mC in all CpG motifs found on the read only and will not use reference sequence as a feature. In this case, per-read predictions will not be combined into a per-site methylation frequency, and methylation will be reported only in per-read output and BAM file.
 
-### Dorado Basecalling
+### 1.2.1 Dorado Basecalling
 
 ```
 # Perform basecalling
@@ -208,7 +213,7 @@ ${INPUT_DIR}/dorado-0.5.3-linux-x64/bin/dorado basecaller --emit-moves --recursi
 
 This will produce an unaligned BAM file named `basecalled.bam` under the `$OUTPUT_DIR` folder. 
 
-### Methylation Calling with DeepMod2
+### 1.2.2 Reference Free Methylation Calling with DeepMod2
 
 Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` model and use the unaligned BAM file and Nanopore signal files as input. In this situation, we will not provide the reference genome FASTA file as input.
 
@@ -246,7 +251,7 @@ We will inspect contents of the per-read output file using `head ${OUTPUT_DIR}/d
 
 In this case the chromosome, position and strand information is not available since the reads were unaligned.
 
-### Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit
+### 1.2.3 Optional Read Alignment to Reference Genome and Per-site frequency calculation with modkit
 The unaligned BAM file produced by DeepMod2 contains 5mC tags MM and ML for all CpG motifs in a read. Reads from this BAM file can be aligned to any reference genome and methylation counts for reads mapping to the same reference CpG sites can be obtained using [modkit](https://github.com/nanoporetech/modkit).
 
 ```
@@ -276,3 +281,96 @@ printf 'chr11\t2699900\t27002000'|bedtools intersect -header -a ${OUTPUT_DIR}/de
 |chr11|2699988|2699989|m|27|.|2699988|2699989|255,0,0|27|55.56|15|12|0|0|1|0|0|
 
 Even though this result does not show haplotype specific methylation, we can see that the modified fraction is ~50-60% as expected.
+
+
+# 2. Methylation Calling from FAST5 files with Guppy basecalling
+**Prepare Directories** 
+```
+INPUT_DIR=data
+OUTPUT_DIR=mod
+
+mkdir -p ${INPUT_DIR}
+mkdir -p ${OUTPUT_DIR}
+```
+**Download Software Packges**
+```
+# Install DeepMod2
+git clone https://github.com/WGLab/DeepMod2.git ${INPUT_DIR}/DeepMod2
+conda env create -f ${INPUT_DIR}/DeepMod2/environment.yml
+conda activate deepmod2
+conda install samtools minimap2 bedtools -y
+
+# Download Guppy basecaller
+wget -qO- https://cdn.oxfordnanoportal.com/software/analysis/ont-guppy_6.5.7_linux64.tar.gz| tar xzf - -C ${INPUT_DIR}
+```
+
+**Download Nanopore data and reference genome**
+```
+# Download reference genome
+wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.39_GRCh38.p13/GRCh38_major_release_seqs_for_alignment_pipelines/GCA_000001405.15_GRCh38_no_alt_plus_hs38d1_analysis_set.fna.gz -O -| gunzip -c > ${INPUT_DIR}/GRCh38.fa
+wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.39_GRCh38.p13/GRCh38_major_release_seqs_for_alignment_pipelines/GCA_000001405.15_GRCh38_no_alt_plus_hs38d1_analysis_set.fna.fai -O ${INPUT_DIR}/GRCh38.fa.fai
+
+# Download FAST5 files
+mkdir -p ${INPUT_DIR}/nanopore_raw_data
+
+wget -qO- https://github.com/WGLab/DeepMod2/files/14368873/sample.fast5.tar.gz| tar xzf - -C ${INPUT_DIR}/nanopore_raw_data
+```
+
+## 2.1 Reference Anchored Methylation Calling
+In order to perform reference anchored methylation calling, we will provide an aligned BAM to DeepMod2. In this case, DeepMod2 will detect 5mC in all CpG motifs found on the read, as wel as any bases of the read that map to a reference CpG site. Finally, it will combine per-read predictions for a given reference CpG site into a per-site methylation frequency. Any unaligned reads or unaligned segments of the reads will also be analyzed for 5mC and reported in per-read output and BAM file, but would not be used in per-site frequency calculation. 
+
+### 2.1.1 Guppy Basecalling and Read Alignment to Reference Genome
+First we will perform basecalling of our nanopore signal file using Guppy basecaller. It is possible to align the reads during basecalling or align the reads after basecalling. Both options are shown below. Since we need move table for our basecalled DNA sequences, we will use `--moves_out` while running Guppy, which will produce an aligned (Option A) or unaligned BAM file (Option B).
+
+#### Option A: Perform Read Alignment during Bascalling with Guppy
+
+Guppy has the option to perform read alignment using minimap2 during basecalling if a reference FASTA file is provided as `--align_ref` option. This can be be helpful in reducing the number of steps needed to run.
+
+```
+${INPUT_DIR}/ont-guppy/bin/guppy_basecaller -i ${INPUT_DIR}/nanopore_raw_data -s ${OUTPUT_DIR}/basecalls --align_ref ${INPUT_DIR}/GRCh38.fa -c dna_r10.4.1_e8.2_400bps_5khz_hac.cfg --bam_out --moves_out --recursive 
+```
+
+This will produce several aligned BAM files under the `${OUTPUT_DIR}/basecalls` subfolders `pass` and `fail`. We will combine these BAM files into a single BAM file to give as input to DeepMod2, and we have a choice of using both pass and fail reads or just pass reads.
+
+```
+find ${OUTPUT_DIR}/basecalls \( -path "*/pass/*" -o -path "*/fail/*" \) -type f -name "*.bam"|samtools cat -b - -o ${OUTPUT_DIR}/aligned.bam
+```
+
+#### Option B: Perform Read Alignment after Bascalling with Guppy
+
+It is possible to run Guppy basecaller without performing alignment. This can be helpful in speeding up basecalling process that requires the use of a GPU instance which can be expensive. It also allows you more flexibility in terms of how you want to perform alignment, with specific minimap2 parameters.
+
+**Basecalling with Guppy**
+
+```
+# Perform basecalling
+${INPUT_DIR}/ont-guppy/bin/guppy_basecaller -i ${INPUT_DIR}/nanopore_raw_data -s ${OUTPUT_DIR}/basecalls -c dna_r10.4.1_e8.2_400bps_5khz_hac.cfg --bam_out --moves_out --recursive 
+```
+
+This will produce several aligned BAM files under the `${OUTPUT_DIR}/basecalls` subfolders `pass` and `fail`. We will align read sequences from these BAM files and we have a choice of using both pass and fail reads or just pass reads.
+
+**Alignment with minimap2**
+
+We will convert this BAM file into FASTQ format while keeping all the tags and pipe into minimap2 for alignment.
+
+```
+# Align using minimap2 while copying move table information
+
+find ${OUTPUT_DIR}/basecalls \( -path "*/pass/*" -o -path "*/fail/*" \) -type f -name "*.bam"|samtools cat -b -|samtools fastq  - -T "*"|minimap2 -ax map-ont ${INPUT_DIR}/GRCh38.fa - -y|samtools view -o ${OUTPUT_DIR}/aligned.bam
+```
+
+This will produce an aligned BAM file named `aligned.bam` under the `$OUTPUT_DIR` folder.
+
+---------
+### 2.1.2 Methylation Calling with DeepMod2 and Guppy Basecalling
+Once you have an aligned BAM file, you can continue with DeepMod2 methylation calling as described in [1.1.3 Methylation Calling with DeepMod2](Example.md#113-methylation-calling-with-deepmod2), you would only need to change `--file_type` parameter to `fast5` since we are using FAST5 file format.
+
+## 2.2 Reference free methylation calling with Guppy Basecalling
+You can perform Guppy basecalling without reference alignment:
+
+```
+# Perform basecalling
+${INPUT_DIR}/ont-guppy/bin/guppy_basecaller -i ${INPUT_DIR}/nanopore_raw_data -s ${OUTPUT_DIR}/basecalls -c dna_r10.4.1_e8.2_400bps_5khz_hac.cfg --bam_out --moves_out --recursive 
+```
+
+ and continue with methylation calling as described in [1.2.2 Reference Free Methylation Calling with DeepMod2](Example.md#122-reference-free-methylation-calling-with-deepmod2).
