@@ -12,3 +12,8 @@ conda activate deepmod2
 ```
 
 After installing, run `python DeepMod2/deepmod2 --help` to see the run options.
+
+### Installation for GPU
+If you want to use GPU to accelerate DeepMod2, make sure to install cuda enabled version of pytorch. Details for GPU accelerated pytorch can be found here https://pytorch.org/get-started/locally/ and you can select the installation command best suited to your system. One xample of installation command is shown below for CUDA 11.8:
+
+`conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia`
