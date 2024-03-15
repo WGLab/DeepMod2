@@ -391,7 +391,7 @@ if __name__ == '__main__':
     
     parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
     
-    parser.add_argument("--pos_list", help='Tab separated chrom pos strand label (1 for mod, 0 for unmod).', type=str)
+    parser.add_argument("--pos_list", help='Tab separated chrom pos strand label. The position is 0-based reference coordinate, strand is + for forward and - for negative strand; label is 1 for mod, 0 for unmod).', type=str)
     parser.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
     
     parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
