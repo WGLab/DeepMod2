@@ -5,7 +5,6 @@ import time, itertools, h5py, pysam
 import datetime, os, shutil, argparse, sys, re, array
 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import multiprocessing as mp
 import numpy as np
@@ -355,11 +354,12 @@ def call_manager(params):
     header_dict=bam_file.header.to_dict()
     
     print('%s: Getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
-        
-    ref_fasta=pysam.FastaFile(params['ref'])
-    ref_seq_dict={rname: get_ref_to_num(ref_fasta.fetch(rname)) for rname in params['chrom']}    
     
     labelled_pos_list=get_pos(params['pos_list'])
+    params['chrom']=[x for x in params['chrom'] if x in labelled_pos_list.keys()]
+    
+    ref_fasta=pysam.FastaFile(params['ref'])
+    ref_seq_dict={rname: get_ref_to_num(ref_fasta.fetch(rname)) for rname in params['chrom']}    
     
     for chrom in ref_seq_dict.keys():
         for strand in [0,1]:
