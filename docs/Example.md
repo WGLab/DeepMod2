@@ -117,7 +117,7 @@ Now we will run DeepMod2's `detect` module using `bilstm_r10.4.1_5khz_v4.3` mode
 ```
 # Run DeepMod2
 BAM_INPUT=${OUTPUT_DIR}/phased.bam # Use ${OUTPUT_DIR}/aligned.bam if you did not use NanoCaller to phase the reads
-python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  $BAM_INPUT--input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa --threads 8
+python ${INPUT_DIR}/DeepMod2/deepmod2 detect --model bilstm_r10.4.1_5khz_v4.3 --file_type pod5 --bam  $BAM_INPUT --input  ${INPUT_DIR}/nanopore_raw_data --output ${OUTPUT_DIR}/deepmod2/ --ref ${INPUT_DIR}/GRCh38.fa --threads 8
 ```
 The output folder of DeepMod2 `${OUTPUT_DIR}/deepmod2/` will contain the following files:
 ```

@@ -1,6 +1,6 @@
 import math, time, argparse, re
 from torch.utils.data import Dataset,DataLoader
-import functools
+import functools, itertools, random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,6 +16,8 @@ import multiprocessing as mp
 import queue
 import pickle
 from pathlib import Path
+from sklearn.model_selection import train_test_split
+import sklearn
 
 class OneHotEncode(nn.Module):
     def __init__(self, num_classes: int):
@@ -216,12 +218,24 @@ class TransformerModel(nn.Module):
         x = self.classifier(x)
         
         return x
-    
-@functools.lru_cache(maxsize=128)
-def read_from_cache(file_name):
-    return read_from_file(file_name)
 
-def read_from_file(file_name):
+def get_files(input_list):
+    out_list=[]
+    if type(input_list)==type(None):
+        return out_list
+    for item in input_list:
+        
+        if os.path.isdir(item):
+            out_list.extend(list(Path(item).rglob("*.npz")))
+
+        elif item[-4:]=='.npz':
+            out_list.append(item)        
+    
+    random.seed(0)
+    random.shuffle(out_list)
+    return out_list
+
+def read_from_file(file_name, validation_type, validation_fraction, data_type):
     data=np.load(file_name)
     mat=data['mat']
     base_qual=data['base_qual']
@@ -234,26 +248,29 @@ def read_from_file(file_name):
 
     labels=torch.Tensor(data['label'][:,np.newaxis])
     
-    return features, base_seq, ref_seq, labels
+    if validation_type=='split':
+        features_train, features_test, base_seq_train, base_seq_test, \
+        ref_seq_train, ref_seq_test, labels_train, labels_test=\
+        train_test_split(features, base_seq, ref_seq, labels, test_size=validation_fraction, random_state=42)
+        if data_type=='train':
+            return features_train, base_seq_train, ref_seq_train, labels_train
+        else:
+            return features_test, base_seq_test, ref_seq_test, labels_test
+        
+    else:
+        return features, base_seq, ref_seq, labels
 
-def generate_batches(files,  data_type='train', batch_size=512):
+def generate_batches(files, validation_type, validation_fraction, data_type, batch_size=512):
     counter = 0
     
     print_freq=max(1, len(files)//10)
-    pattern = r'/(HG[^/]+)/'
     
     while counter<len(files):
         file_name = files[counter]
 
         counter +=1
         
-        if data_type=='test':
-            data=read_from_cache(file_name)
-            genome = re.findall(pattern, str(file_name))[0]
-
-        else:
-            data=read_from_file(file_name)
-            genome = re.findall(pattern, str(file_name))[0]
+        data=read_from_file(file_name, validation_type, validation_fraction, data_type)
 
         features, base_seq, ref_seq, labels=data
         
@@ -261,29 +278,115 @@ def generate_batches(files,  data_type='train', batch_size=512):
             batch_x=features[local_index:(local_index + batch_size)]
             batch_base_seq=base_seq[local_index:(local_index + batch_size)]
             batch_ref_seq=ref_seq[local_index:(local_index + batch_size)]
-            batch_y=labels[local_index:(local_index + batch_size)]
-            
-            
+            batch_y=labels[local_index:(local_index + batch_size)]          
 
-            yield batch_x, batch_base_seq, batch_ref_seq, batch_y, genome
+            yield batch_x, batch_base_seq, batch_ref_seq, batch_y
         
         if counter%print_freq==0:
             print('.', end='',flush=True)
 
-def train(training_input, testing_input, model_config, epochs, prefix, retrain, batch_size, args_str):
+def generate_batches_mixed_can_mod(data_file_list, validation_type, validation_fraction, data_type, batch_size=128):
+    
+    data_file_list=[x for x in data_file_list if len(x)!=0]
+    
+    sizes=np.array([sum(len(np.load(f)['label']) for f in data) for data in data_file_list])
+    batch_sizes=(batch_size*sizes/np.sum(sizes)).astype(int)
+    batch_sizes[0]=batch_sizes[0]+batch_size-np.sum(batch_sizes)
+    
+    generators=[generate_batches(group_files, validation_type, validation_fraction, data_type, batch_size=group_batch_size) 
+                for group_files, group_batch_size in zip(data_file_list, batch_sizes)]
+    
+    
+    for multi_batch_data in itertools.zip_longest(*generators, fillvalue=[[],[],[],[]]):
+        batch_x=torch.vstack([d[0] for d in multi_batch_data if len(d[0])>0])
+        batch_base_seq=torch.vstack([d[1] for d in multi_batch_data if len(d[1])>0])
+        batch_ref_seq=torch.vstack([d[2] for d in multi_batch_data if len(d[2])>0])
+        batch_y=torch.vstack([d[3] for d in multi_batch_data if len(d[3])>0])
+        
+        yield batch_x, batch_base_seq, batch_ref_seq, batch_y
+
+def get_stats(metrics_dict, dtype):
+    
+    loss_str='{}  Loss:'.format(dtype)
+    acc_str='{} Accuracy:'.format(dtype)
+    prec_str='{} Precision:'.format(dtype)
+    rec_str='{} Recall:'.format(dtype)
+    f1_str='{} F1:'.format(dtype)
+    
+    for g in sorted(metrics_dict.keys()):
+        
+        acc=metrics_dict[g]['true']/max(1,metrics_dict[g]['len'])
+        loss=metrics_dict[g]['loss']/max(1,metrics_dict[g]['len'])
+        precision=metrics_dict[g]['TP']/max(1,metrics_dict[g]['TP']+metrics_dict[g]['FP'])
+        recall=metrics_dict[g]['TP']/max(1,metrics_dict[g]['TP']+metrics_dict[g]['FN'])
+        f1=2*precision*recall/(precision+recall) if precision*recall!=0 else 0
+
+        if len(metrics_dict.keys())==1:
+            x='Total'
+            total_acc=acc
+        else:
+            x=g
+            
+        loss_str+='  %s: %.4f' %(x, loss)
+        acc_str+='  %s: %.4f' %(x, acc)
+        prec_str+='  %s: %.4f' %(x, precision)
+        rec_str+='  %s: %.4f' %(x, recall)
+        f1_str+='  %s: %.4f' %(x, f1)
+        
+    if len(metrics_dict.keys())>1:
+        x='Total'
+        
+        acc=sum(f['true'] for f in metrics_dict.values())/max(1,sum(f['len'] for f in metrics_dict.values()))
+        loss=sum(f['loss'] for f in metrics_dict.values())/max(1,sum(f['len'] for f in metrics_dict.values()))
+        precision=sum(f['TP'] for f in metrics_dict.values())/max(1,sum(f['TP'] for f in metrics_dict.values()) +sum(f['FP'] for f in metrics_dict.values()))
+        recall=sum(f['TP'] for f in metrics_dict.values())/max(1,sum(f['TP'] for f in metrics_dict.values())+sum(f['FN'] for f in metrics_dict.values()))
+        f1=2*precision*recall/(precision+recall) if precision*recall!=0 else 0
+        
+        total_acc=acc
+        
+        loss_str+='  %s: %.4f' %(x, loss)
+        acc_str+='  %s: %.4f' %(x, acc)
+        prec_str+='  %s: %.4f' %(x, precision)
+        rec_str+='  %s: %.4f' %(x, recall)
+        f1_str+='  %s: %.4f' %(x, f1)
+    
+    return '\n'.join([loss_str, acc_str,prec_str, rec_str, f1_str]), total_acc
+
+def get_metrics(metrics_dict,name, batch_y, score, loss):
+    eval_counts=sklearn.metrics.confusion_matrix(batch_y.cpu(),(score>0).cpu(),labels=[0,1])
+    metrics_dict[name]['len']+=len(batch_y)
+    metrics_dict[name]['TP']+=eval_counts[1,1]
+    metrics_dict[name]['FP']+=eval_counts[0,1]
+    metrics_dict[name]['FN']+=eval_counts[1,0]
+    metrics_dict[name]['true']=metrics_dict[name]['true']+eval_counts[0,0]+eval_counts[1,1]
+    metrics_dict[name]['loss']+=loss.item()*len(batch_y)
+    
+def train(training_dataset, validation_dataset, validation_type, validation_fraction, model_config, epochs, prefix, retrain, batch_size, args_str, seed):
     
     print('Starting training.' , flush=True)
-    
-    model_type, model_save_path = model_config['model_type'], model_config['model_save_path']
+    torch.manual_seed(seed)
+    model_type = model_config['model_type']
+    model_save_path = model_config.pop('model_save_path')
     
     if torch.cuda.is_available():  
         dev = "cuda:0" 
     else:
         dev = "cpu"
-
     
-    loss_list={'train':[],'test':[]}
-    acc_list={'train':[],'test':[]}
+    weight_counts=np.array([np.sum(np.eye(2)[np.load(f)['label']],axis=0) for f in itertools.chain.from_iterable(training_dataset)])
+    weight_counts=np.sum(weight_counts,axis=0)
+    
+    
+    if model_config['weights']=='equal':
+        pos_weight=torch.Tensor(np.array(1.0))
+    
+    elif model_config['weights']=='auto':
+        pos_weight=torch.Tensor(np.array(weight_counts[0]/weight_counts[1]))
+    
+    else:
+        pos_weight=torch.Tensor(np.array(float(model_config['weights'])))
+
+    print('Number of Modified Instances={}\nNumber of Un-Modified Instances={}\nPositive Label Weight={}\n'.format(weight_counts[1],weight_counts[0],pos_weight), flush=True)
 
     model_dims=(21,10)
     
@@ -303,7 +406,7 @@ def train(training_input, testing_input, model_config, epochs, prefix, retrain, 
                                pe_type=model_config['pe_type'], fc_type=model_config['fc_type']);
         
     net.to(dev);
-    criterion = nn.BCEWithLogitsLoss()
+    
     optimizer = optim.Adam(net.parameters(), lr= model_config['lr'], weight_decay=model_config['l2_coef'])
     
     if retrain:
@@ -317,15 +420,20 @@ def train(training_input, testing_input, model_config, epochs, prefix, retrain, 
     num_params=sum(p.numel() for p in net.parameters())
     print('# Parameters=', num_params, flush=True)
     
-    log_file_path=os.path.join(model_save_path, '%s.log.%s' %(prefix, os.environ['SLURM_JOB_ID']))
-    pattern = r'/(HG[^/]+)/'
-    list_of_genomes=list(set(re.findall(pattern, str(file_name))[0] for file_name in testing_input+training_input))
+    config_path=os.path.join(model_save_path, '%s.cfg' %prefix)
+    
+    with open(config_path, 'wb') as handle:
+        pickle.dump(model_config, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    log_file_path=os.path.join(model_save_path, '%s.log' %prefix)
     
     train_w_wo_ref=model_config['train_w_wo_ref']
     include_ref=model_config['include_ref']
     
     if include_ref and train_w_wo_ref:
-        list_of_genomes=list_of_genomes+[x+'_wo_ref' for x in list_of_genomes]
+        list_of_evals=['Normal', 'Without_Ref']
+    else:
+        list_of_evals=['Normal']
     
     dummy_ref_seq=(4+torch.zeros(batch_size, 21)).type(torch.LongTensor).to(dev)
     
@@ -336,99 +444,68 @@ def train(training_input, testing_input, model_config, epochs, prefix, retrain, 
         
         for j in range(epochs):
             net.train()
-            acc_train={g:0 for g in list_of_genomes}
-            loss_train={g:0 for g in list_of_genomes}
-            len_train={g:1 for g in list_of_genomes}
             
-            acc_test={g:0 for g in list_of_genomes}
-            loss_test={g:0 for g in list_of_genomes}
-            len_test={g:1 for g in list_of_genomes}
+            metrics_train={g:{'TP':0,'FP':0,'FN':0,'loss':0,'len':0,'true':0} for g in list_of_evals}
+            metrics_test={g:{'TP':0,'FP':0,'FN':0,'loss':0,'len':0,'true':0} for g in list_of_evals}
 
-            t=time.time() 
-            train_gen=generate_batches(training_input,  data_type='train', batch_size=batch_size)
-
+            t=time.time()
+            
+            train_gen=generate_batches_mixed_can_mod(training_dataset, validation_type, validation_fraction,  data_type="train", batch_size=batch_size)
+            
             for batch in train_gen:
-                batch_x, batch_base_seq, batch_ref_seq, batch_y, genome =batch
+                batch_x, batch_base_seq, batch_ref_seq, batch_y =batch
                 batch_x, batch_base_seq, batch_ref_seq, batch_y=batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev), batch_y.to(dev)
                 
                 optimizer.zero_grad()
                 score= net(batch_x, batch_base_seq, batch_ref_seq)
-                loss =  criterion(score, batch_y)
+                loss =  torch.nn.functional.binary_cross_entropy_with_logits(score, batch_y,pos_weight=pos_weight)
 
                 loss.backward()
                 optimizer.step()
-
-                len_train[genome]+=len(batch_y)
-                acc_train[genome]+=sum(batch_y==(score>=0)).cpu()
-                loss_train[genome]+=loss.item()*len(batch_y)
+                
+                get_metrics(metrics_train,'Normal', batch_y, score, loss)
                 
                 if include_ref and train_w_wo_ref:
                     dummy_batch_ref_seq=dummy_ref_seq[:batch_ref_seq.size(0)]
                     optimizer.zero_grad()
                     score= net(batch_x, batch_base_seq, dummy_batch_ref_seq)
-                    loss =  criterion(score, batch_y)
+                    loss =  torch.nn.functional.binary_cross_entropy_with_logits(score, batch_y,pos_weight=pos_weight)
 
                     loss.backward()
                     optimizer.step()
-
-                    len_train[genome+'_wo_ref']+=len(batch_y)
-                    acc_train[genome+'_wo_ref']+=sum(batch_y==(score>=0)).cpu()
-                    loss_train[genome+'_wo_ref']+=loss.item()*len(batch_y)
+                    get_metrics(metrics_train,'Without_Ref', batch_y, score, loss)
                     
             with torch.no_grad():
                 net.eval()
-                test_gen=generate_batches(testing_input,  data_type='test', batch_size=batch_size)
+                
+                if validation_type=='split':
+                    test_gen=generate_batches(list(itertools.chain.from_iterable(training_dataset)), validation_type, validation_fraction,  data_type="test", batch_size=batch_size)
+                    
+                else:
+                    test_gen=generate_batches(validation_dataset, validation_type, validation_fraction,  data_type="test", batch_size=batch_size)
                 
                 for batch in test_gen:
-                    batch_x, batch_base_seq, batch_ref_seq, batch_y, genome = batch
+                    batch_x, batch_base_seq, batch_ref_seq, batch_y = batch
                     batch_x, batch_base_seq, batch_ref_seq, batch_y=batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev), batch_y.to(dev)
 
                     score= net(batch_x, batch_base_seq, batch_ref_seq)
-                    loss =  criterion(score, batch_y)
+                    loss = torch.nn.functional.binary_cross_entropy_with_logits(score, batch_y,pos_weight=pos_weight)
 
-                    len_test[genome]+=len(batch_y)
-                    acc_test[genome]+=sum(batch_y==(score>=0)).cpu()
-                    loss_test[genome]+=loss.item()*len(batch_y)
+                    get_metrics(metrics_test,'Normal', batch_y, score, loss)
                     
                     if include_ref and train_w_wo_ref:
                         dummy_batch_ref_seq=dummy_ref_seq[:batch_ref_seq.size(0)]
                         score= net(batch_x, batch_base_seq, dummy_batch_ref_seq)
-                        loss =  criterion(score, batch_y)
-
-                        len_test[genome+'_wo_ref']+=len(batch_y)
-                        acc_test[genome+'_wo_ref']+=sum(batch_y==(score>=0)).cpu()
-                        loss_test[genome+'_wo_ref']+=loss.item()*len(batch_y)                    
-                    
-            train_loss_str='Loss     Train:'
-            for g in sorted(loss_train.keys()):
-                train_loss_str+='  %s: %.4f' %(g, loss_train[g]/len_train[g])
-            
-            total_train_loss=sum(loss_train.values())/sum(len_train.values())
-            train_loss_str+='  %s: %.4f' %('Total', total_train_loss)
-
-            train_acc_str='Accuracy Train:'
-            for g in sorted(acc_train.keys()):
-                train_acc_str+='  %s: %.4f' %(g, acc_train[g]/len_train[g])
-
-            total_train_acc=float(sum(acc_train.values())/sum(len_train.values()))
-            train_acc_str+='  %s: %.4f' %('Total', total_train_acc)
-
-            test_loss_str='Loss     Validation:'
-            for g in sorted(loss_test.keys()):
-                test_loss_str+='    %s: %.4f' %(g, loss_test[g]/len_test[g])
-            
-            total_test_loss=sum(loss_test.values())/sum(len_test.values())
-            test_loss_str+='  %s: %.4f' %('Total', total_test_loss)
-
-            test_acc_str='Accuracy Validation:'
-            for g in sorted(acc_test.keys()):
-                test_acc_str+='  %s: %.4f' %(g, acc_test[g]/len_test[g])
-            
-            total_test_acc=float(sum(acc_test.values())/sum(len_test.values()))
-            test_acc_str+='  %s: %.4f' %('Total', total_test_acc)
-
-            epoch_log='\nEpoch %d: #Train=%d  #Test=%d  Time=%.4f\n%s\n%s\n%s\n%s'\
-                  %(j+1, sum(len_train.values()), sum(len_test.values()), time.time()-t, train_loss_str, train_acc_str, test_loss_str, test_acc_str)
+                        loss =  torch.nn.functional.binary_cross_entropy_with_logits(score, batch_y,pos_weight=pos_weight)
+                        
+                        get_metrics(metrics_test,'Without_Ref', batch_y, score, loss)
+                                            
+            train_str, _ = get_stats(metrics_train, 'Training')
+            test_str, total_test_acc = get_stats(metrics_test, 'Testing')
+                
+            epoch_log='\n\nEpoch %d: #Train=%d  #Test=%d  Time=%.4f\n%s\n\n%s'\
+                  %(j+1, sum(x['len'] for x in metrics_train.values()), sum(x['len'] for x in metrics_test.values()), time.time()-t, 
+                    train_str, test_str)
             print(epoch_log, flush=True)
             log_file.write(epoch_log)
             
@@ -438,15 +515,26 @@ def train(training_input, testing_input, model_config, epochs, prefix, retrain, 
             'model_state_dict': net.state_dict(),
             'optimizer_state_dict': optimizer.state_dict()}, model_path)
     
-    return
+    return net
 
 if __name__=='__main__':
     start_time=time.time()
     
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--training_input", help='Training input. There are three ways to specify the input: 1) path to a folder containing .npz files in which case all npz files will be used for training, 2) path to a single .npz file, 3) path to a text file containing paths of .npz files to use for training.')
-    parser.add_argument("--testing_input", help='Testing input. There are three ways to specify the input: 1) path to a folder containing .npz files in which case all npz files will be used for testing, 2) path to a single .npz file, 3) path to a text file containing paths of .npz files to use for testing.')
+
+    parser.add_argument("--mixed_training_dataset", nargs='*', help='Training dataset with mixed labels. A whitespace separated list of folders containing .npz files or paths to individual .npz files.')
+
+    parser.add_argument("--can_training_dataset", nargs='*', help='Training dataset with unmodified or canonical base labels. A whitespace separated list of folders containing .npz files or paths to individual .npz files.')
+    parser.add_argument("--mod_training_dataset", nargs='*', help='Training dataset with modified labels. A whitespace separated list of folders containing .npz files or paths to individual .npz files.')
+
+    parser.add_argument("--validation_type",choices=['split','dataset'], help='How the validation is performed. "split" means that a fraction of training dataset, specified by --validation_fraction, will be used for validation. "dataset" means that additional validation dataset is provided via --validation_input parameter.',default="split")
+    parser.add_argument("--validation_fraction", help='Fraction of training dataset to use for validation if --validation_type is set to "split", otherwise ignored.', type=float, default=0.2)
+    parser.add_argument("--validation_dataset",nargs='*', help='Validation dataset if --validation_type is set to dataset. A whitespace separated list of folders containing .npz files or paths to individual .npz files.')
+
     parser.add_argument("--prefix", help='Prefix name for the model checkpoints', default='model')
+
+    parser.add_argument("--weights", help='Weight of positive(modified) label used in binary cross entropy loss, the negative(unmodified) label will always have a fixed weight of 1. Higher weight for modified labels will favor recall and lower weight will favor precision. Choices are "equal", "auto" or your can specify the weight of positive(modified) labels. "equal" assigns a weight of 1 to modified labels, "auto" assigns a weight=num_negative_samples/num_positive_samples to modified labels.', default='equal')
+
 
     parser.add_argument("--model_save_path", help='Folder path for saving model checkpoints')
     parser.add_argument("--epochs", help='Number of total epochs', default=100, type=int)
@@ -455,56 +543,50 @@ if __name__=='__main__':
 
     parser.add_argument("--fc_type", help='Type of full connection to use in the classifier.', type=str, default='all', choices=['middle', 'all'])
     parser.add_argument("--model_type", help='Type of model to use', type=str, choices=['bilstm', 'transformer'])
+    parser.add_argument("--window", help='Number of bases before and after the modified base of interest used in feature generation', type=int)
 
     parser.add_argument("--num_layers", help='Number of transformer encoder or BiLSTM layers', type=int, default=3)
     parser.add_argument("--dim_feedforward", help='Dimension of feedforward layers in  transformer encoder or size of hidden units in BiLSTM layers', type=int, default=100)
     parser.add_argument("--num_fc", help='Size of fully connected layer between encoder/BiLSTM and classifier', type=int, default=16)
     parser.add_argument("--embedding_dim", help='Size of embedding dimension for read and reference bases', type=int, default=4)
     parser.add_argument("--embedding_type", help='Type of embedding for bases', type=str, choices=['learnable', 'one_hot'], default='one_hot')
-    parser.add_argument("--pe_dim", help='Dimension for positional encoding/embedding', type=int, default=16)
-    parser.add_argument("--pe_type", help='Type of positional encoding/embedding. fixed is sinusoid, embedding is is dictionary lookup, parameter weight matrix.', type=str, choices=['fixed', 'embedding', 'parameter'], default='fixed')
-    parser.add_argument("--nhead", help='Number of self-attention heads in transformer encoder.', type=int, default=4)
-    parser.add_argument("--include_ref", help='Whether to include reference positions as features', default=False, action='store_true')
-    parser.add_argument("--train_w_wo_ref", help='Include both ref and without ref.', default=False, action='store_true')
+    parser.add_argument("--pe_dim", help='Dimension for positional encoding/embedding for transformer model.', type=int, default=16)
+    parser.add_argument("--pe_type", help='Type of positional encoding/embedding for transformer model. fixed is sinusoid, embedding is is dictionary lookup, parameter weight matrix.', type=str, choices=['fixed', 'embedding', 'parameter'], default='fixed')
+    parser.add_argument("--nhead", help='Number of self-attention heads in transformer encoder  for transformer model.', type=int, default=4)
+    parser.add_argument("--include_ref", help='Whether to include reference sequence as features. Recommended.', default=False, action='store_true')
+    parser.add_argument("--train_w_wo_ref", help='Include examples with reference and without reference sequence. Recommended if you will be using referenve free modification detection.', default=False, action='store_true')
 
     parser.add_argument("--lr", help='Learning rate', type=float, default=1e-4)
     parser.add_argument("--l2_coef", help='L2 regularization coefficient', type=float, default=1e-5)
-
+    parser.add_argument("--seed", help='Random seed to use in pytorch for reproducibility or reinitialization of weights', default=None)
+    
     args = parser.parse_args()
-              
-    training_input=args.training_input
-    testing_input=args.testing_input
-
+    
     os.makedirs(args.model_save_path, exist_ok=True)
 
-    if os.path.isdir(training_input):
-        training_input=list(Path(training_input).rglob("*.npz"))
-    elif training_input[-4:]=='.npz':
-        training_input=[training_input]
-    else:
-        with open(training_input,'r') as training_input_file:
-            training_input=training_input_file.read().splitlines()
+    mixed_training_dataset=get_files(args.mixed_training_dataset)
+    can_training_dataset=get_files(args.can_training_dataset)
+    mod_training_dataset=get_files(args.mod_training_dataset)
 
-    if os.path.isdir(testing_input):
-        testing_input=list(Path(testing_input).rglob("*.npz"))
-    elif testing_input[-4:]=='.npz':
-        testing_input=[testing_input]
-    else:
-        with open(testing_input,'r') as testing_input_file:
-            testing_input=testing_input_file.read().splitlines()
-
-    model_config = dict(model_dims=(21,10), model_type=args.model_type,
-        num_layers=args.num_layers, dim_feedforward=args.dim_feedforward,
-        num_fc=args.num_fc, embedding_dim=args.embedding_dim,
-        embedding_type=args.embedding_type, include_ref=args.include_ref,
-        pe_dim=args.pe_dim, nhead=args.nhead, pe_type=args.pe_type,
-        l2_coef=args.l2_coef, lr=args.lr, model_save_path=args.model_save_path, fc_type=args.fc_type,
-        train_w_wo_ref=args.train_w_wo_ref)
+    validation_dataset=get_files(args.validation_dataset)
+    validation_type=args.validation_type
+    validation_fraction=args.validation_fraction
+    
+    model_config = dict(model_dims=(2*args.window+1,10),window=args.window, model_type=args.model_type,
+    num_layers=args.num_layers, dim_feedforward=args.dim_feedforward,
+    num_fc=args.num_fc, embedding_dim=args.embedding_dim,
+    embedding_type=args.embedding_type, include_ref=args.include_ref,
+    pe_dim=args.pe_dim, nhead=args.nhead, pe_type=args.pe_type,
+    l2_coef=args.l2_coef, lr=args.lr, model_save_path=args.model_save_path, fc_type=args.fc_type,
+    train_w_wo_ref=args.train_w_wo_ref, weights=args.weights)
 
     args_dict=vars(args)
     args_str=''.join('%s: %s\n' %(k,str(v)) for k,v in args_dict.items())
     print(args_str, flush=True)
-
-    res=train(training_input, testing_input, model_config, epochs=args.epochs,prefix=args.prefix, retrain=args.retrain, batch_size=args.batch_size, args_str=args_str)
+    
+    seed =random.randint(0, 0xffff_ffff_ffff_ffff) if args.seed is None else int(args.seed)
+    
+    training_dataset = [mixed_training_dataset, can_training_dataset, mod_training_dataset]
+    res=train(training_dataset, validation_dataset, validation_type, validation_fraction, model_config, epochs=args.epochs,prefix=args.prefix, retrain=args.retrain, batch_size=args.batch_size, args_str=args_str, seed=seed)
     
     print('Time taken=%.4f' %(time.time()-start_time), flush=True)

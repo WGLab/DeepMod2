@@ -111,11 +111,6 @@ def get_pos(path):
     return labelled_pos_list
 
 def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label):
-    mat=np.vstack(mat)
-    base_qual=np.vstack(base_qual)
-    base_seq=np.vstack(base_seq).astype(np.int8)
-    ref_seq=np.vstack(ref_seq).astype(np.int8)
-    label=np.hstack(label).astype(np.int8)
     np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label)
                        
 def get_output(params, output_Q, process_event):
@@ -125,7 +120,9 @@ def get_output(params, output_Q, process_event):
     
     chunk=1
     read_count=0
+    
     output_file_path=os.path.join(output,'%s.features.%d.npz' %(params['prefix'], chunk))
+        
     mat, base_qual, base_seq, ref_seq, label=[], [], [], [], []
     
     while True:
@@ -143,11 +140,25 @@ def get_output(params, output_Q, process_event):
                     
                     read_count+=1
                    
-                    if read_count%reads_per_chunk==0:
+                    if read_count%reads_per_chunk==0 and len(mat)>0:
+                        mat=np.vstack(mat)
+                        base_qual=np.vstack(base_qual)
+                        base_seq=np.vstack(base_seq).astype(np.int8)
+                        ref_seq=np.vstack(ref_seq).astype(np.int8)
+                        label=np.hstack(label).astype(np.int8)
+                        
+                        idx=np.random.permutation(np.arange(len(label)))
+                        mat=mat[idx]
+                        base_qual=base_qual[idx]
+                        base_seq=base_seq[idx]
+                        ref_seq=ref_seq[idx]
+                        label=label[idx]
+                        
                         print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
                         
-                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label)
                         
+                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label)
+
                         chunk+=1
                         output_file_path=os.path.join(output,'%s.features.%d.npz' %(params['prefix'], chunk))
                         mat, base_qual, base_seq, ref_seq, label=[], [], [], [], []
@@ -155,15 +166,31 @@ def get_output(params, output_Q, process_event):
                 except queue.Empty:
                     pass
                     
-    if read_count>0:
-        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label) 
+    if read_count>0 and len(mat)>0:
+        mat=np.vstack(mat)
+        base_qual=np.vstack(base_qual)
+        base_seq=np.vstack(base_seq).astype(np.int8)
+        ref_seq=np.vstack(ref_seq).astype(np.int8)
+        label=np.hstack(label).astype(np.int8)
     
+        idx=np.random.permutation(np.arange(len(label)))
+        
+        mat=mat[idx]
+        base_qual=base_qual[idx]
+        base_seq=base_seq[idx]
+        ref_seq=ref_seq[idx]
+        label=label[idx]
+
+        print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
+
+        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label)
+
     return
 
 def process(params, ref_seq_dict, signal_Q, output_Q, input_event):
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
-    window=10
+    window=params['window']
     window_range=np.arange(-window,window+1)
     
     div_threshold=params['div_threshold']
@@ -378,6 +405,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
     parser.add_argument("--bam", help='Path to bam file', type=str, required=True)
+    parser.add_argument("--window", help='Number of bases before or after the base of interest to include in the model. Total number of bases included in teh model will be 2xwindow+1.', type=int, default=10)
     parser.add_argument("--prefix", help='Prefix for the output files',type=str, default='output')
     parser.add_argument("--input", help='Path to folder containing POD5 or FAST5 files. Files will be recusrviely searched.', type=str, required=True)
     
@@ -385,20 +413,20 @@ if __name__ == '__main__':
     
     parser.add_argument("--threads", help='Number of processors to use',type=int, default=1)
     
-    parser.add_argument("--div_threshold", help='Divergence Threshold. 21bp windowsThere are three ways to specify the input: 1) path to a folder containing .npz files in which case all npz files will be used for training, 2) path to a single .npz file, 3) path to a text file containing paths of .npz files to use for training. ',type=float, default=0.25)
+    parser.add_argument("--div_threshold", help='Divergence Threshold.',type=float, default=0.25)
     
     parser.add_argument("--reads_per_chunk", help='reads_per_chunk',type=int, default=100000)
     
     parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
     
-    parser.add_argument("--pos_list", help='Tab separated chrom pos strand label (1 for mod, 0 for unmod).', type=str)
+    parser.add_argument("--pos_list", help='Tab separated chrom pos strand label. The position is 0-based reference coordinate, strand is + for forward and - for negative strand; label is 1 for mod, 0 for unmod).', type=str)
     parser.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
     
     parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
     parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
     parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=0)
     parser.add_argument("--fast5_move", help='Use move table from FAST5 file instead of BAM file. If this flag is set, specify a basecall group for FAST5 file using --guppy_group parameter and ensure that the FAST5 files contains move table.', default=False, action='store_true')
-    
+        
     args = parser.parse_args()
     
     if not args.output:
@@ -414,6 +442,7 @@ if __name__ == '__main__':
         
         
     params=dict(bam=args.bam, 
+            window=args.window,
             pos_list=args.pos_list, 
             ref=args.ref, 
             input=args.input,

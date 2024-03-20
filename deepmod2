@@ -17,6 +17,7 @@ if __name__ == '__main__':
     parent_parser.add_argument("--output", help= 'Path to folder where intermediate and final files will be stored, default is current working directory', type=str)
     
     
+    
     parent_parser.add_argument("--qscore_cutoff", help='Minimum cutoff for mean quality score of a read',type=float, default=0)
     parent_parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=0)
     
@@ -32,7 +33,15 @@ if __name__ == '__main__':
     
     detect_required=detect_parser.add_argument_group("Required Arguments")
     
+    detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based index of nucleotide within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only.', nargs=2, default=['CG','0'])
+    
+    detect_parser.add_argument("--mod_positions", help='A tab separated list of reference coordinates to call modification on. Modifications will only be called on reference positions specified that overlap with the motif, and no modification detection will be performed on other loci. The file shoule have the following format: "contig  position  strand" on each line. Position should be zero-based and start should be "+" or "-".', default=None)
+    
+    detect_parser.add_argument("--reference_motif_only", help='Restrict modification calling to reference motif matches only', default=False, action='store_true')
+    
+    
     detect_parser.add_argument("--threads", help='Number of threads to use for processing signal and running model inference. If a GPU is used for inference, then --threads number of threads will be running on GPU concurrently. The total number of threads used by DeepMod2 is equal to --threads plus --bam_threads. It is recommended to run DeepMod2 with mutliple cores, and use at least 4 bam_threads for compressing BAM file.',type=int, default=4)
+     
     detect_parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
     
     
@@ -124,7 +133,7 @@ if __name__ == '__main__':
             else:
                 dev = "cpu"
         params={'input':args.input, 'output':args.output, 'threads':args.threads, 
-                'prefix':args.prefix, 'window':10, 'model':args.model, 
+                'prefix':args.prefix, 'model':args.model, 
                 'qscore_cutoff':args.qscore_cutoff, 'ref':args.ref,
                 'length_cutoff':args.length_cutoff, 'bam':args.bam,
                 'file_type':args.file_type, 'fast5_move':args.fast5_move,
@@ -133,7 +142,10 @@ if __name__ == '__main__':
                 'skip_per_site':args.skip_per_site, 'chrom_list':chrom_list, "dev":dev,
                 'disable_pruning':args.disable_pruning, 'batch_size':args.batch_size, 
                 'exclude_ref_features':args.exclude_ref_features,'bam_threads':args.bam_threads,
-                'skip_unmapped':args.skip_unmapped}
+                'skip_unmapped':args.skip_unmapped, 'mod_positions':args.mod_positions,
+                'motif_seq':args.motif[0], 'motif_ind':int(args.motif[1]),
+                'reference_motif_only':args.reference_motif_only
+                }
 
         print('\n%s: \nCommand: python %s\n' %(str(datetime.datetime.now()), ' '.join(sys.argv)), flush=True)
 

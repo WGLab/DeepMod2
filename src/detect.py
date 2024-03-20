@@ -55,13 +55,13 @@ def get_events(signal, move):
 
     return data
 
-def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):    
+def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, motif_seq, motif_base, motif_ind, position_based):    
     if align_data[0]:
         is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
         
-        c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
-        cg_id=np.array([m.start(0) for m in re.finditer(r'CG', read_seq)])
-        ref_motif_pos=ref_pos_dict[ref_name] if is_forward else ref_pos_dict[ref_name] +1
+        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
+        motif_id=np.array([m.start(0)+motif_ind for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
 
         common_pos=ref_motif_pos[(ref_motif_pos>=reference_start)&(ref_motif_pos<reference_end)]
         aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
@@ -75,8 +75,8 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):
             aligned_pairs_read_wise=aligned_pairs_read_wise[::-1]
             aligned_pairs_read_wise[:,0]=read_length-aligned_pairs_read_wise[:,0]-1
             
-        if len(cg_id)>0:
-            aligned_pairs_read_wise=aligned_pairs_read_wise[cg_id]
+        if len(motif_id)>0 and not position_based:
+            aligned_pairs_read_wise=aligned_pairs_read_wise[motif_id]
             
             #if need to disable clipped bases
             #aligned_pairs_read_wise=aligned_pairs_read_wise[(reference_start<=aligned_pairs_read_wise[:,1]) & (aligned_pairs_read_wise[:,1]<reference_end)]
@@ -84,15 +84,15 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):
             merged=np.vstack((aligned_pairs_ref_wise, aligned_pairs_read_wise))
             _,ind=np.unique(merged[:,0], return_index=True)
             merged=merged[ind]
-            return c_id, merged, aligned_pairs_read_wise_original
+            return base_id, merged, aligned_pairs_read_wise_original
         
         else:
-            return c_id, aligned_pairs_ref_wise, aligned_pairs_read_wise_original
+            return base_id, aligned_pairs_ref_wise, aligned_pairs_read_wise_original
     
     else:
-        c_id={m.start(0):i for i,m in enumerate(re.finditer(r'C', read_seq))}
-        cg_id=np.array([[m.start(0),-1] for m in re.finditer(r'CG', read_seq)])
-        return (c_id, cg_id, None)
+        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
+        motif_id=np.array([[m.start(0)+motif_ind,-1] for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        return (base_id, motif_id, None)
 
 def per_site_info(data):
     # unmod, mod, score
@@ -106,7 +106,7 @@ def per_site_info(data):
     except:
         return 0, 0, 0
     
-def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
+def get_cpg_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     header=pysam.AlignmentHeader.from_dict(header_dict)
     
     bam_threads=params['bam_threads']
@@ -132,11 +132,11 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     
     cpg_ref_only=not params['include_non_cpg_ref']
     
-    ref_pos_set_dict={rname:set(motif_list) for rname, motif_list in ref_pos_dict.items() if rname!='lock' } if cpg_ref_only else None
+    ref_pos_set_dict={rname:set(motif_list[0]) for rname, motif_list in ref_pos_dict.items() if rname!='lock' } if cpg_ref_only else None
        
     counter_check=0
     with open(per_read_file_path,'w') as per_read_file:
-        per_read_file.write('read_name\tchromosome\tref_position_before\tref_position\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\tread_phase\tref_cpg\n')
+        per_read_file.write('read_name\tchromosome\tref_position_before\tref_position\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\tread_phase\tref_motif\n')
         
         with pysam.AlignmentFile(bam_output, "wb", threads=bam_threads, header=header) as outf:
             while True:
@@ -248,7 +248,7 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
                 continue
             #fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
             
-            agg_stats, fwd_stats, rev_stats=get_stats_string(chrom, pos, is_ref_cpg, cpg)
+            agg_stats, fwd_stats, rev_stats=get_stats_string_cpg(chrom, pos, is_ref_cpg, cpg)
             if agg_stats[0]>0:
                 agg_per_site_file.write(agg_stats[1])
 
@@ -264,19 +264,153 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     
     return
 
+def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
+    header=pysam.AlignmentHeader.from_dict(header_dict)
+    
+    bam_threads=params['bam_threads']
+
+    output=params['output']
+    bam_output=os.path.join(output,'%s.bam' %params['prefix'])
+    per_read_file_path=os.path.join(output,'%s.per_read' %params['prefix'])
+
+    
+    per_site_file_path=os.path.join(output,'%s.per_site' %params['prefix'])
+    agg_per_site_file_path=os.path.join(output,'%s.per_site.aggregated' %params['prefix'])
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
+    
+    mod_threshold=params['mod_t']
+    unmod_threshold=params['unmod_t']
+    
+    skip_per_site=params['skip_per_site']
+    
+    per_site_pred={}
+    
+    counter=0    
+       
+    counter_check=0
+    with open(per_read_file_path,'w') as per_read_file:
+        per_read_file.write('read_name\tchromosome\tref_position_before\tref_position\tread_position\tstrand\tmethylation_score\tmean_read_qscore\tread_length\tread_phase\n')
+        
+        with pysam.AlignmentFile(bam_output, "wb", threads=bam_threads, header=header) as outf:
+            while True:
+                if methylation_event.is_set() and output_Q.empty():
+                    break
+                else:
+                    try:
+                        res = output_Q.get(block=False, timeout=10)
+                        #continue
+                        if counter//10000>counter_check:
+                            counter_check=counter//10000
+                            print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
+                        if res[0]:
+                            _, total_read_info, total_candidate_list, total_MM_list, read_qual_list, pred_list = res
+                            for read_data, candidate_list, MM, ML, pred_list in zip(*res[1:]):
+                                counter+=1
+                                read_dict, read_info = read_data
+                                read=pysam.AlignedSegment.from_dict(read_dict,header)
+                                if MM:
+                                    read.set_tag('MM',MM,value_type='Z')
+                                    read.set_tag('ML',ML)
+                                    
+                                outf.write(read)
+                                
+                                read_name=read_dict['name']
+                                is_forward, chrom, read_length, mean_qscore=read_info
+                                chrom=chrom if chrom else 'NA'
+                                
+                                strand='+' if is_forward else '-'
+                                
+                                phase=0
+                                phase=read.get_tag('HP') if read.has_tag('HP') else 0
+                                
+                                
+                                if float(mean_qscore)<qscore_cutoff or int(read_length)<length_cutoff:
+                                    continue
+                                    
+                                for i in range(len(pred_list)):
+                                    read_pos=candidate_list[i][0]+1
+                                    ref_pos=candidate_list[i][1]
+                                    score=pred_list[i]
+                                    
+                                    ref_pos_str_before=str(ref_pos) if ref_pos!=-1 else 'NA'
+                                    ref_pos_str_after=str(ref_pos+1) if ref_pos!=-1 else 'NA'
+                                    
+                                    if ref_pos_str_before=='NA':    
+                                        pass
+                                    
+                                    else:
+                                        if score<mod_threshold and score>unmod_threshold:
+                                                pass
+                                        elif not skip_per_site:
+                                            mod=score>=mod_threshold
+
+                                            if (chrom, ref_pos,strand) not in per_site_pred:
+                                                per_site_pred[(chrom, ref_pos,strand)]=[0]*6
+
+                                            per_site_pred[(chrom, ref_pos,strand)][2*phase+mod]+=1
+
+                                    per_read_file.write('%s\t%s\t%s\t%s\t%d\t%s\t%.4f\t%.2f\t%d\t%d\n' %(read_name, chrom, ref_pos_str_before, ref_pos_str_after, read_pos, strand, score, mean_qscore, read_length, phase))
+                        
+                                
+                        else:
+                            _, total_read_info=res
+                            for read_dict in total_read_info:
+                                counter+=1
+                                read=pysam.AlignedSegment.from_dict(read_dict,header)
+                                outf.write(read)
+                                
+                    except queue.Empty:
+                        pass    
+    
+    print('%s: Number of reads processed: %d' %(str(datetime.datetime.now()), counter), flush=True)
+    print('%s: Finished Per-Read Methylation Output. Starting Per-Site output.' %str(datetime.datetime.now()), flush=True)        
+    print('%s: Modification Tagged BAM file: %s' %(str(datetime.datetime.now()),bam_output), flush=True)
+    print('%s: Per Read Prediction file: %s' %(str(datetime.datetime.now()), per_read_file_path), flush=True)
+    
+    if skip_per_site:
+        return 
+    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+                 'coverage','mod_coverage', 'unmod_coverage','mod_fraction',
+                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_fraction_phase1',
+                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_fraction_phase2']
+    per_site_header='\t'.join(per_site_fields)+'\n'
+    
+    
+    per_site_file_path=os.path.join(params['output'],'%s.per_site' %params['prefix'])
+        
+    with open(per_site_file_path, 'w') as per_site_file:
+        per_site_file.write(per_site_header)
+
+        for x in sorted(per_site_pred.keys()):
+            chrom, pos, strand=x
+            mod_call=per_site_pred[x]
+
+            stats=get_stats_string(chrom, pos, strand, mod_call)
+            if stats[0]>0:
+                per_site_file.write(stats[1])
+    
+    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
+    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+    return
+
 def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     torch.set_grad_enabled(False);
     
     dev=params['dev']
-                
+    motif_seq=params['motif_seq']
+    motif_base=motif_seq[params['motif_ind']]
+    motif_ind=params['motif_ind']
+    mod_symbol='m' if motif_seq=='CG' else motif_base
+    position_based=params['position_based']
+    
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
     cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':3, 'P':4, 'B':4}
     cigar_pattern = r'\d+[A-Za-z]'
     
-    window=10
-    
-    model=get_model(params)
+    model, model_config=get_model(params)
+    window=model_config['window']
     
     model.eval()
     model.to(dev);
@@ -332,7 +466,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                     aligned_pairs=None
 
 
-                pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict)
+                pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict, motif_seq, motif_base, motif_ind, position_based)
 
                 pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
                                                         &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
@@ -374,7 +508,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                     c_idx=[True if x in pos_list_c else False for x in pos_list_candidates[:,0]]
                     c_idx_count=np.vectorize(pos_list_c.get)(pos_list_candidates[c_idx,0])
                     c_idx_count[1:]=c_idx_count[1:]-c_idx_count[:-1]-1
-                    MM='C+m?,'+','.join(c_idx_count.astype(str))+';'
+                    MM='{}+{}?,'.format(motif_base,mod_symbol)+','.join(c_idx_count.astype(str))+';'
                     total_c_idx.append(c_idx)
                     total_MM_list.append(MM)
 
@@ -575,14 +709,28 @@ def call_manager(params):
     ref_seq_dict={}
     ref_pos_dict={}
     
+    mod_positions_list=get_pos(params['mod_positions']) if params['mod_positions'] else None
+    position_based=True if params['mod_positions'] else False
+    
+    
     _=get_ref_to_num('ACGT')
+    
     if params['ref'] and len(params['chrom_list'])>0:
         with mp.Pool(processes=params['threads']) as pool:
-            res=pool.map(get_ref_info, zip(repeat(params['ref']), params['chrom_list']))
+            res=pool.map(get_ref_info, zip(repeat(params), params['chrom_list']))
             for r in res:
-                chrom, seq_array, pos_array=r
+                chrom, seq_array, fwd_pos_array, rev_pos_array=r
                 ref_seq_dict[chrom]=seq_array
-                ref_pos_dict[chrom]=pos_array
+                
+                if position_based:
+                    ref_pos_dict[chrom]=(np.array(sorted(list(set(fwd_pos_array)&set(mod_positions_list[chrom][0])))),
+                                         np.array(sorted(list(set(rev_pos_array)&set(mod_positions_list[chrom][1])))))
+                   
+                else:
+                    ref_pos_dict[chrom]=(fwd_pos_array, rev_pos_array)
+                
+                
+    params['position_based']=True if position_based or params['reference_motif_only'] else False
     
     res=None
     
@@ -598,7 +746,10 @@ def call_manager(params):
     input_process = mp.Process(target=get_input, args=(params, signal_Q, output_Q, input_event))
     input_process.start()
     
-    output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict, ref_pos_dict));
+    if params['motif_seq']=='CG':
+        output_process=mp.Process(target=get_cpg_output, args=(params, output_Q, methylation_event, header_dict, ref_pos_dict));
+    else:
+        output_process=mp.Process(target=get_output, args=(params, output_Q, methylation_event, header_dict, ref_pos_dict));
     output_process.start();
     
     for hid in range(max(1,params['threads']-1)):
@@ -619,4 +770,3 @@ def call_manager(params):
     output_process.join()
     
     return
-

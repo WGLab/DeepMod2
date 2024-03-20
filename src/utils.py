@@ -1,5 +1,5 @@
 from subprocess import PIPE, Popen
-import os, shutil, pysam, sys, datetime
+import os, shutil, pysam, sys, datetime, re, pickle
 import numpy as np
 from numba import jit
 import torch
@@ -13,36 +13,36 @@ model_dict={
     
     'bilstm_r9.4.1' : {       'path' : 'models/bilstm/R9.4.1',
                                'help':'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
-                               'model_type':'bilstm'},
+                               'model_config_path':'models/bilstm.cfg'},
     
     'bilstm_r10.4.1_4khz_v3.5': {  'path' : 'models/bilstm/R10.4.1_4kHz_v3.5',
                               'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v3.5 Guppy/Dorado basecaller model.',
-                              'model_type':'bilstm'},
+                              'model_config_path':'models/bilstm.cfg'},
     
         'bilstm_r10.4.1_4khz_v4.1': {  'path' : 'models/bilstm/R10.4.1_4kHz_v4.1',
                               'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v4.1 Guppy/Dorado basecaller model.',
-                              'model_type':'bilstm'},
+                              'model_config_path':'models/bilstm.cfg'},
     
     'bilstm_r10.4.1_5khz_v4.3': {  'path' : 'models/bilstm/R10.4.1_5kHz_v4.3',
                               'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
-                              'model_type':'bilstm'},
+                              'model_config_path':'models/bilstm.cfg'},
     
     
     'transformer_r9.4.1' : {  'path' : 'models/transformer/R9.4.1',
                               'help':'Transformer model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
-                              'model_type':'transformer'},
+                              'model_config_path':'models/transformer.cfg'},
     
     'transformer_r10.4.1_4khz_v3.5': { 'path' : 'models/transformer/R10.4.1_4kHz_v3.5',
                                   'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v3.5 Guppy/Dorado basecaller model.',
-                                  'model_type':'transformer'},    
+                                  'model_config_path':'models/transformer.cfg'},    
     
         'transformer_r10.4.1_4khz_v4.1': { 'path' : 'models/transformer/R10.4.1_4kHz_v4.1',
                                   'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 4kHz sampling, with basecalling performed by v4.1 Guppy/Dorado basecaller model.',
-                                  'model_type':'transformer'},    
+                                  'model_config_path':'models/transformer.cfg'},    
     
         'transformer_r10.4.1_5khz_v4.3': { 'path' : 'models/transformer/R10.4.1_5kHz_v4.3',
                                   'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
-                                  'model_type':'transformer'}, 
+                                  'model_config_path':'models/transformer.cfg'}, 
 }
 
 comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
@@ -58,31 +58,33 @@ def get_model_help():
         
 def get_model(params):
     model_name=params['model']
-    model_type=None
+    model_config_path=None
     model_path=None
     
     if model_name in model_dict:
         dirname = os.path.dirname(__file__)
         model_info=model_dict[model_name]
-        model_type = model_info['model_type']
-        model_path = os.path.join(dirname,model_info['path'])
+        model_config_path = os.path.join(dirname, model_info['model_config_path'])
+        model_path = os.path.join(dirname, model_info['path'])
     
     else:
         try:
-            model_type_ = model_name.split(',')[0]
-            model_path_ = model_name.split(',')[1]
-
-            if os.path.isfile(model_path_) and model_type_ in ['bilstm','transformer']:
-                model_type = model_type_
-                model_path = model_path_
+            model_config_path = model_name.split(',')[0]
+            model_path = model_name.split(',')[1]
                 
         except IndexError:
             print('Incorrect model specified')
             sys.exit(2)
             
-    if model_type=='bilstm':
-        model = BiLSTM(model_dims=(21,10), num_layers=2, \
-                     dim_feedforward=128, num_fc=128);
+    with open(model_config_path, 'rb') as handle:
+        model_config = pickle.load(handle)
+    
+    if model_config['model_type']=='bilstm':
+        model = BiLSTM(model_dims=model_config['model_dims'], num_layers=model_config['num_layers'], \
+                     dim_feedforward=model_config['dim_feedforward'], \
+                     num_fc=model_config['num_fc'], embedding_dim=model_config['embedding_dim'], \
+                     embedding_type=model_config['embedding_type'], include_ref=model_config['include_ref'], \
+                     fc_type=model_config['fc_type']);
 
         checkpoint = torch.load(model_path,  map_location ='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -92,11 +94,15 @@ def get_model(params):
             prune.l1_unstructured(module, name="weight", amount=0.95)
             prune.remove(module, 'weight')
 
-        return model
+        return model, model_config
 
-    elif model_type=='transformer':
-        model = TransformerModel(model_dims=(21,10), num_layers=4, nhead=8, \
-                     dim_feedforward=256, pe_dim=64, num_fc=128);
+    elif model_config['model_type']=='transformer':
+        net = TransformerModel(model_dims=model_config['model_dims'], num_layers=model_config['num_layers'], \
+                     dim_feedforward=model_config['dim_feedforward'], \
+                     num_fc=model_config['num_fc'], embedding_dim=model_config['embedding_dim'], \
+                     embedding_type=model_config['embedding_type'], include_ref=model_config['include_ref'],\
+                     pe_dim=model_config['pe_dim'], nhead=model_config['nhead'], \
+                               pe_type=model_config['pe_type'], fc_type=model_config['fc_type']);
 
         checkpoint = torch.load(model_path,  map_location ='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -116,7 +122,7 @@ def get_model(params):
                 prune.l1_unstructured(module, name="weight", amount=0.25)
                 prune.remove(module, 'weight')
 
-        return model
+        return model, model_config
        
     else:
         print('Model: %s not found.' %params['model'], flush=True)
@@ -201,17 +207,33 @@ def get_ref_to_num(x):
     b[-1,0]=4
     b[-1,1]=4
     
-    cg=np.where((b[:-1,0]==1)&(b[1:,1]==1))[0]
-    return b, cg
+    return b
+
+def get_pos(path):
+    labelled_pos_list={}
+    strand_map={'+':0, '-':1}
+    
+    with open(path) as file:
+            for line in file:
+                line=line.rstrip('\n').split('\t')
+                if line[0] not in labelled_pos_list:
+                    labelled_pos_list[line[0]]={0:[], 1:[]}
+                    
+                labelled_pos_list[line[0]][strand_map[line[2]]].append(int(line[1]))
+    
+    return labelled_pos_list
 
 def get_ref_info(args):
-    ref_path, chrom=args
-    ref_fasta=pysam.FastaFile(ref_path)
+    params, chrom=args
+    motif_seq, motif_ind=params['motif_seq'], params['motif_ind']
+    ref_fasta=pysam.FastaFile(params['ref'])
     seq=ref_fasta.fetch(chrom).upper()
-    seq_array, pos_array=get_ref_to_num(seq)
-    return chrom, seq_array, pos_array
+    seq_array=get_ref_to_num(seq)
+    fwd_pos_array=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])+motif_ind
+    rev_pos_array=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])+len(motif_seq)-1-motif_ind
+    return chrom, seq_array, fwd_pos_array, rev_pos_array
 
-def get_stats_string(chrom, pos, is_ref_cpg, cpg):
+def get_stats_string_cpg(chrom, pos, is_ref_cpg, cpg):
     unphased_rev_unmod, unphased_rev_mod, unphased_fwd_unmod, unphased_fwd_mod=cpg[0:4]
     phase1_rev_unmod, phase1_rev_mod, phase1_fwd_unmod, phase1_fwd_mod=cpg[4:8]
     phase2_rev_unmod, phase2_rev_mod, phase2_fwd_unmod, phase2_fwd_mod=cpg[8:12]
@@ -243,6 +265,24 @@ def get_stats_string(chrom, pos, is_ref_cpg, cpg):
     agg_str='{}\t{}\t{}\t{}\t'.format(chrom, pos, pos+2, is_ref_cpg)+'{}\t{}\t{}\t{:.4f}\t'.format(*agg_total_stats) + '{}\t{}\t{}\t{:.4f}\t'.format(*agg_phase1_stats) + '{}\t{}\t{}\t{:.4f}\n'.format(*agg_phase2_stats)
     
     return [(agg_total_stats[0], agg_str),(fwd_total_stats[0], fwd_str),(rev_total_stats[0], rev_str)]
+
+
+def get_stats_string(chrom, pos, strand, mod_call):
+    unphased_unmod, unphased_mod=mod_call[0:2]
+    phase1_unmod, phase1_mod=mod_call[2:4]
+    phase2_unmod, phase2_mod=mod_call[4:6]
+    
+    mod=unphased_mod+phase1_mod+phase2_mod
+    unmod=unphased_unmod+phase1_unmod+phase2_unmod
+    
+    total_stats=[mod+unmod, mod, unmod,mod/(mod+unmod) if mod+unmod>0 else 0]
+    phase1_stats=[phase1_mod+phase1_unmod, phase1_mod, phase1_unmod, phase1_mod/(phase1_mod+phase1_unmod) if phase1_mod+phase1_unmod>0 else 0]
+    phase2_stats=[phase2_mod+phase2_unmod, phase2_mod, phase2_unmod, phase2_mod/(phase2_mod+phase2_unmod) if phase2_mod+phase2_unmod>0 else 0]
+    
+    mod_str='{}\t{}\t{}\t{}\t'.format(chrom, pos, pos+1, strand)+'{}\t{}\t{}\t{:.4f}\t'.format(*total_stats) + '{}\t{}\t{}\t{:.4f}\t'.format(*phase1_stats) + '{}\t{}\t{}\t{:.4f}\n'.format(*phase2_stats)
+    
+    return total_stats[0], mod_str
+
 
 def get_per_site(params, input_list):
     qscore_cutoff=params['qscore_cutoff']
