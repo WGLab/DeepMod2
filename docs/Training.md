@@ -12,7 +12,7 @@ In this section, we will train a 5mC methylation model from POD5 files of two hu
 
 ![image](https://github.com/WGLab/DeepMod2/assets/35819083/d9d4d7c1-9696-43b8-b0ff-96b43806b02c)
 
-Modified data is contained in `mod.pod5` which has 5mC in all the reads at the CpG positions specified by a file `mod_list`. Unmodified data is contained in `unmod.pod5` which has 5mC in all the reads at the CpG positions specified by a file `unmod_list`. In this case, `mod_list` and `unmod_list` contain the same positions, but this does not have to be the case depending upon your sample. `mod_list` and `unmod_list` contain human reference genome coordinates that tell us which positions to use for creating features for model training, and also tell whether the position is on forward or reverse strand. These file have one position per line, containing four pieces of information separated by whitespace in the following format: 
+Modified data is contained in `mod.pod5` which has 5mC in all the reads at the CpG positions specified by a file `mod_list`. Unmodified data is contained in `unmod.pod5` which has 5mC in all the reads at the CpG positions specified by a file `unmod_list`. There are two ways to specify which genomic positions to use to generate features: 1) using a list of positions with a modification label (`--pos_list`), 2) using a motif to target all motif matches assuming they are all modifiedon unmodified (`--motif --motif_label`). In this demo we will use the first option. In our example, the coordinate files `mod_list` and `unmod_list` contain the same positions, but this does not have to be the case depending upon your sample. `mod_list` and `unmod_list` contain human reference genome coordinates that tell us which positions to use for creating features for model training, and also tell whether the position is on forward or reverse strand. These file have one position per line, containing four pieces of information separated by whitespace in the following format: 
 
 ```contig position strand label```
 
@@ -33,6 +33,8 @@ chr11   2698551 -       0
 chr11   2698596 +       0
 chr11   2698597 -       0
 ```
+
+**Important Note:** Specifying positions of interest via a motif can be problematic if not all motifs occurrences are modified or unmodified in a sample, or if the modification label is unknown for certain occurrences of the motif. Using a list of coordinates can circumvent this problem by letting you specify only the most confident labels.
 
 ## Data Preparation
 First we will download the necessary datasets and software, and create directories to do the analysis.
