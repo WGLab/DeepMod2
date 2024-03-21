@@ -1,20 +1,13 @@
 from collections import defaultdict, ChainMap
-
 import time, itertools, h5py, pysam
-
 import datetime, os, shutil, argparse, sys, re, array
-
 import os
-
+from itertools import repeat
 import multiprocessing as mp
 import numpy as np
-
 from pathlib import Path
-
 from ont_fast5_api.fast5_interface import get_fast5_file
-
 from numba import jit
-
 import queue, gzip
 import pod5 as p5
 
@@ -57,6 +50,23 @@ def get_ref_to_num(x):
     b[-1,1]=4
             
     return b
+
+def get_ref_info(args):
+    params, chrom=args
+    motif_seq, motif_ind=params['motif_seq'], params['motif_ind']
+    ref_fasta=pysam.FastaFile(params['ref'])
+    seq=ref_fasta.fetch(chrom).upper()
+    seq_array=get_ref_to_num(seq)
+    
+    fwd_pos_array, rev_pos_array=None, None
+    if motif_seq:
+        fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])
+        rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])
+
+        fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind]))))
+        rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind]))))
+    
+    return chrom, seq_array, fwd_pos_array, rev_pos_array
 
 @jit(nopython=True)
 def get_events(signal, move):
@@ -355,16 +365,33 @@ def call_manager(params):
     
     print('%s: Getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     
-    labelled_pos_list=get_pos(params['pos_list'])
-    params['chrom']=[x for x in params['chrom'] if x in labelled_pos_list.keys()]
+    if params['pos_list']:
+        labelled_pos_list=get_pos(params['pos_list'])
+        params['chrom']=[x for x in params['chrom'] if x in labelled_pos_list.keys()]
     
-    ref_fasta=pysam.FastaFile(params['ref'])
-    ref_seq_dict={rname: get_ref_to_num(ref_fasta.fetch(rname)) for rname in params['chrom']}    
+    motif_label=params['motif_label']
+    _=get_ref_to_num('ACGT')
+    ref_seq_dict={}
     
-    for chrom in ref_seq_dict.keys():
-        for strand in [0,1]:
-            for pos in labelled_pos_list[chrom][strand]:
-                ref_seq_dict[chrom][pos,strand+2]=labelled_pos_list[chrom][strand][pos]+1
+    with mp.Pool(processes=params['threads']) as pool:
+        res=pool.map(get_ref_info, zip(repeat(params), params['chrom']))
+        for r in res:
+            chrom, seq_array, fwd_pos_array, rev_pos_array=r
+            ref_seq_dict[chrom]=seq_array
+
+            if params['motif_seq']:
+                strand=0
+                for pos in fwd_pos_array:
+                    ref_seq_dict[chrom][pos,strand+2]=motif_label+1
+                    
+                strand=1
+                for pos in rev_pos_array:
+                    ref_seq_dict[chrom][pos,strand+2]=motif_label+1
+
+            else:
+                for strand in [0,1]:
+                    for pos in labelled_pos_list[chrom][strand]:
+                        ref_seq_dict[chrom][pos,strand+2]=labelled_pos_list[chrom][strand][pos]+1
                 
     print('%s: Finished getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     
@@ -419,13 +446,18 @@ if __name__ == '__main__':
     
     parser.add_argument("--ref", help='Path to reference FASTA file to anchor methylation calls to reference loci. If no reference is provided, only the motif loci on reads will be used.', type=str)
     
-    parser.add_argument("--pos_list", help='Tab separated chrom pos strand label. The position is 0-based reference coordinate, strand is + for forward and - for negative strand; label is 1 for mod, 0 for unmod).', type=str)
+    parser.add_argument("--pos_list", help='Text file containing a list of positions to generate features for. Use either --pos_list or --motif to specify how to choose loci for feature generation, but not both. The file should be whitespace separated with the following information on each line: chrom pos strand label. The position is 0-based reference coordinate, strand is + for forward and - for negative strand; label is 1 for mod, 0 for unmod).', type=str)
+    
     parser.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
     
     parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
     parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
     parser.add_argument("--length_cutoff", help='Minimum cutoff for read length',type=int, default=0)
     parser.add_argument("--fast5_move", help='Use move table from FAST5 file instead of BAM file. If this flag is set, specify a basecall group for FAST5 file using --guppy_group parameter and ensure that the FAST5 files contains move table.', default=False, action='store_true')
+    
+    parser.add_argument("--motif", help='Motif for generating features followed by zero-based indices of nucleotides within the motif to generate features for. Use either --pos_list or --motif to specify how to choose loci for feature generation, but not both. Features will be generated for all loci of the read that map to a reference sequence that matches the motif. Multiple indices can be specified but they should refer to the same nucleotide letter.  If you use --motif, it is assumed that all loci have the same modification label and you need to specify the label using --motif_label.', nargs='*')
+    
+    parser.add_argument("--motif_label", help='Modification label for the motif. 0 is for unmodified and 1 is for modified.',type=int, choices=[0,1])
         
     args = parser.parse_args()
     
@@ -439,13 +471,44 @@ if __name__ == '__main__':
         chrom_list=args.chrom
     else:
         chrom_list=pysam.Samfile(args.bam).references
+
         
+     
+    if len(args.motif)>0:
+        if args.pos_list is not None:
+            print('Use either --motif or --pos_list but not both', flush=True)
+            sys.exit(3)
+            
+        if args.motif_label is None:
+            print('--motif_label should be specified with --motif option', flush=True)
+            sys.exit(3)
+            
+        if len(args.motif)<2 or len(set(args.motif[0])-set('ACGT'))>0 or  all([a.isnumeric() for a in args.motif[1:]])==False:
+            print('--motif not specified correctly', len(args.motif)<2, len(set(args.motif[0])-set('ACGT'))==0, all([a.isnumeric() for a in args.motif[1:]])==False,flush=True)
+            sys.exit(3)
+
+        else:
+            motif=args.motif[0]
+            motif_ind=[int(x) for x in args.motif[1:]]
+            if len(set(motif[x] for x in motif_ind))!=1:
+                print('motif base should be same for all indices', flush=True)
+                sys.exit(3)
+    else:
+        motif=None
+        motif_ind=None
         
+        if args.pos_list is None:
+            print('Use either --motif or --pos_list', flush=True)
+            sys.exit(3)
+            
     params=dict(bam=args.bam, 
             window=args.window,
             pos_list=args.pos_list, 
             ref=args.ref, 
             input=args.input,
+            motif_seq=motif,
+            motif_ind=motif_ind,
+            motif_label=args.motif_label,
             file_type=args.file_type,
             guppy_group=args.guppy_group,
             fast5_move=args.fast5_move,
