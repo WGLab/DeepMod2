@@ -60,7 +60,10 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, motif_seq,
         is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
         
         base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
-        motif_id=np.array([m.start(0)+motif_ind for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        
+        motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        motif_id=np.array(sorted(list(set.union(*[set(motif_anchor+i) for i in motif_ind]))))
+        
         ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
 
         common_pos=ref_motif_pos[(ref_motif_pos>=reference_start)&(ref_motif_pos<reference_end)]
@@ -399,7 +402,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     
     dev=params['dev']
     motif_seq=params['motif_seq']
-    motif_base=motif_seq[params['motif_ind']]
+    motif_base=motif_seq[params['motif_ind'][0]]
     motif_ind=params['motif_ind']
     mod_symbol='m' if motif_seq=='CG' else motif_base
     position_based=params['position_based']
@@ -712,6 +715,8 @@ def call_manager(params):
     mod_positions_list=get_pos(params['mod_positions']) if params['mod_positions'] else None
     position_based=True if params['mod_positions'] else False
     
+    if position_based:
+        params['chrom_list']=[x for x in params['chrom_list'] if x in mod_positions_list.keys()]
     
     _=get_ref_to_num('ACGT')
     

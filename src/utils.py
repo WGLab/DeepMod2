@@ -229,8 +229,14 @@ def get_ref_info(args):
     ref_fasta=pysam.FastaFile(params['ref'])
     seq=ref_fasta.fetch(chrom).upper()
     seq_array=get_ref_to_num(seq)
-    fwd_pos_array=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])+motif_ind
-    rev_pos_array=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])+len(motif_seq)-1-motif_ind
+    
+    
+    fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])
+    rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])
+
+    fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind]))))
+    rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind]))))
+    
     return chrom, seq_array, fwd_pos_array, rev_pos_array
 
 def get_stats_string_cpg(chrom, pos, is_ref_cpg, cpg):

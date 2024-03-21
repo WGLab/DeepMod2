@@ -33,7 +33,7 @@ if __name__ == '__main__':
     
     detect_required=detect_parser.add_argument_group("Required Arguments")
     
-    detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based index of nucleotide within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only.', nargs=2, default=['CG','0'])
+    detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based indices of nucleotides within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only. Multiple indices can be specified but they should refer to the same nucleotide letter.', nargs='*', default=['CG','0'])
     
     detect_parser.add_argument("--mod_positions", help='A tab separated list of reference coordinates to call modification on. Modifications will only be called on reference positions specified that overlap with the motif, and no modification detection will be performed on other loci. The file shoule have the following format: "contig  position  strand" on each line. Position should be zero-based and strand should be "+" or "-".', default=None)
     
@@ -132,6 +132,21 @@ if __name__ == '__main__':
                 dev = "cuda" 
             else:
                 dev = "cpu"
+                
+
+
+        if len(args.motif)<2 or len(set(args.motif[0])-set('ACGT'))>0 or  all([a.isnumeric() for a in args.motif[1:]])==False:
+            print('--motif not specified correctly', len(args.motif)<2, len(set(args.motif[0])-set('ACGT'))==0, all([a.isnumeric() for a in args.motif[1:]])==False,flush=True)
+            sys.exit(3)
+            
+        else:
+            motif=args.motif[0]
+            motif_ind=[int(x) for x in args.motif[1:]]
+            if len(set(motif[x] for x in motif_ind))!=1:
+                print('motif base should be same for all indices', flush=True)
+                sys.exit(3)
+                
+            
         params={'input':args.input, 'output':args.output, 'threads':args.threads, 
                 'prefix':args.prefix, 'model':args.model, 
                 'qscore_cutoff':args.qscore_cutoff, 'ref':args.ref,
@@ -143,7 +158,7 @@ if __name__ == '__main__':
                 'disable_pruning':args.disable_pruning, 'batch_size':args.batch_size, 
                 'exclude_ref_features':args.exclude_ref_features,'bam_threads':args.bam_threads,
                 'skip_unmapped':args.skip_unmapped, 'mod_positions':args.mod_positions,
-                'motif_seq':args.motif[0], 'motif_ind':int(args.motif[1]),
+                'motif_seq':motif, 'motif_ind':motif_ind,
                 'reference_motif_only':args.reference_motif_only
                 }
 
