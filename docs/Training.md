@@ -36,7 +36,7 @@ chr11   2698597 -       0
 
 **Important Note:** Specifying positions of interest via a motif can be problematic if not all motifs occurrences are modified or unmodified in a sample, or if the modification label is unknown for certain occurrences of the motif. Using a list of coordinates can circumvent this problem by letting you specify only the most confident labels.
 
-## Data Preparation
+## 1.1 Data Preparation
 First we will download the necessary datasets and software, and create directories to do the analysis.
 
 **Prepare Directories**
@@ -107,7 +107,7 @@ DORADO_PATH=${INPUT_DIR}/dorado-0.5.3-osx-arm64
 
 `DORADO_PATH` variable stores the path to Dorado installation.
 
-## Dorado basecalling with move tables
+## 1.2 Dorado basecalling with move tables
 In order to generate features for our model, we will first basecall our samples with Dorado using `--emit-moves` to create move tables in addition to basecalls. We will also provide reference genome to Dorado produced aligned BAM file, but you can also skip providing reference genome to Dorado and align yourself later using minimap2.
 
 ```
@@ -126,7 +126,7 @@ The above commands will create
 - `${INPUT_DIR}/bam_files/unmod.bam` BAM file from basecalling of unmodified (canonical) sample `${INPUT_DIR}/data_download/signal_files/unmod.pod5`
 - `${INPUT_DIR}/bam_files/all_reads.bam` test BAM file from basecalling of sample `${INPUT_DIR}/data_download/signal_files/` which is just the modified and unmodified sample POD5 files for the purpose of demonstration. We will use this testing sample to run DeepMod2 on the trained model, not for model validation during training.
 
-## Generate Training Features
+## 1.3 Generate Training Features
 We will use `generate_features.py` module under `train` folder of DeepMod2 repository to generate features for model training. You can find a list of options using `python ${DeepMod2_DIR}/train/generate_features.py --help` command. We will generate features separately for modified and unmodified samples by providing signal POD5 file as `--input`, BAM file as `--bam` and a list of positions with modified/unmodified labels as `--pos_list`. In this case, we will use a window size of 10, which means how many bases before and after each base position of interest (from pos_list) to include in feature generation. At this stage, you do not need to specify a motif to `generate_features.py`, as you are providing a list of coordinates directly. You can use `--chrom  CHROM` to generate features for just a single chromosome and use `--threads NUM_THREADS` to speed up feature generation.
 
 ```
@@ -139,7 +139,7 @@ python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/u
 
 This will allow us to create modified sample features under `${OUTPUT_DIR}/features/mod/` directory, and unmodified sample features under `${OUTPUT_DIR}/features/unmod/`. We will supply these two folders to model training module.
 
-## Train DeepMod2 Model
+## 1.4 Train DeepMod2 Model
 We will train a deep learning model using `train_models.py` module under `train` folder of DeepMod2 repository. You can find a full list of options using `python ${DeepMod2_DIR}/train/train_models.py --help` command. In this demo, we will train a small model:
 
 - using BiLSTM architecture (`--model_type bilstm`)
@@ -395,7 +395,7 @@ The folder contains a long file `model.log`, 10 saved model checkpoints `model.e
 model_path=`ls -1tr ${OUTPUT_DIR}/can_mod_bilstm/model.epoch*|tail -1`
 ```
 
-# Test DeepMod2 Model
+## 1.5 Test DeepMod2 Model
 We will now use the model `model.epoch10.0.7846` and `model.cfg` on the test dataset using DeepMod2's `detect` module. We will provide the model as `--model PATH_TO_MODEL_CONFIGURATION_FILE,PATH_TO_MODEL_CHECKPOINT` where we provide the paths to model configuration file and model checkpoint separated by a comma to `--model` parameter. 
 
 For inference, we need to provide a motif using `--motif` parameter as `--motif CG 0` by specifying the motif and 0-based indices of the bases of interest within the motif separated by whitespace. This parameter tells which base in the motif to call modification on. The default behaviour is to call modifications on all loci of a read that either match the motif, or map to a reference position that matches the motif. You can choose to call modifications only on those read loci that map to a reference position with motif match by using `--reference_motif_only` parameter. You can further narrow down the loci where the modification is called if you are only interested in a select few reference motif positions by specifying a file with a list of coordinates of interest using `--mod_positions` parameter. This file is whitespace separated and has the following format: "contig position strand" on each line, where position should be zero-based and strand should be "+" or "-".
@@ -452,7 +452,7 @@ chr11   2692201 +       1
 chr11   2692210 +       1
 ```
 
-## Data Preparation
+## 2.1 Data Preparation
 First we will download the necessary datasets and software, and create directories to do the analysis.
 
 **Prepare Directories**
@@ -523,7 +523,7 @@ DORADO_PATH=${INPUT_DIR}/dorado-0.5.3-osx-arm64
 
 `DORADO_PATH` variable stores the path to Dorado installation.
 
-## Dorado basecalling with move tables
+## 2.2 Dorado basecalling with move tables
 In order to generate features for our model, we will first basecall our sample with Dorado using `--emit-moves` to create move tables in addition to basecalls. We will also provide reference genome to Dorado produced aligned BAM file, but you can also skip providing reference genome to Dorado and align yourself later using minimap2.
 
 ```
@@ -533,7 +533,7 @@ ${DORADO_PATH}/bin/dorado basecaller --emit-moves --recursive --reference ${INPU
 
 The above command will create `${INPUT_DIR}/bam_files/all_reads.bam` BAM file from the basecalling of sample `${INPUT_DIR}/data_download/signal_files/`. We will use this sample for training and validation of model, and then again for running DeepMod2 on the trained model.
 
-## Generate Training Features
+## 2.3 Generate Training Features
 We will use `generate_features.py` module under `train` folder of DeepMod2 repository to generate features for model training. You can find a list of options using `python ${DeepMod2_DIR}/train/generate_features.py --help` command. We will generate features separately for the sample by providing signal POD5 file as `--input`, BAM file as `--bam` and a list of positions with modified/unmodified labels as `--pos_list`. In this case, we will use a window size of 10, which means how many bases before and after each base position of interest (from pos_list) to include in feature generation. At this stage, you do not need to specify a motif to `generate_features.py`, as you are providing a list of coordinates directly. You can use `--chrom  CHROM` to generate features for just a single chromosome and use `--threads NUM_THREADS` to speed up feature generation.
 
 ```
@@ -543,7 +543,7 @@ python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/a
 
 This will allow us to create features under `${OUTPUT_DIR}/features/mixed/` directory that contains both modified and unmodified instances. We will supply this folder to model training module.
 
-## Train DeepMod2 Model
+## 2.4 Train DeepMod2 Model
 We will train a deep learning model using `train_models.py` module under `train` folder of DeepMod2 repository. You can find a full list of options using `python ${DeepMod2_DIR}/train/train_models.py --help` command. In this demo, we will train a small model:
 
 - using BiLSTM architecture (`--model_type bilstm`)
@@ -799,7 +799,7 @@ The folder contains a long file `model.log`, 10 saved model checkpoints `model.e
 model_path=`ls -1tr ${OUTPUT_DIR}/mixed_bilstm/model.epoch*|tail -1`
 ```
 
-# Test DeepMod2 Model
+## 2.5 Test DeepMod2 Model
 We will now use the model `model.epoch10.0.8678` and `model.cfg` on the test dataset using DeepMod2's `detect` module. We will provide the model as `--model PATH_TO_MODEL_CONFIGURATION_FILE,PATH_TO_MODEL_CHECKPOINT` where we provide the paths to model configuration file and model checkpoint separated by a comma to `--model` parameter. 
 
 For inference, we need to provide a motif using `--motif` parameter as `--motif CG 0` by specifying the motif and 0-based indices of the bases of interest within the motif separated by whitespace. This parameter tells which base in the motif to call modification on. The default behaviour is to call modifications on all loci of a read that either match the motif, or map to a reference position that matches the motif. You can choose to call modifications only on those read loci that map to a reference position with motif match by using `--reference_motif_only` parameter. You can further narrow down the loci where the modification is called if you are only interested in a select few reference motif positions by specifying a file with a list of coordinates of interest using `--mod_positions` parameter. This file is whitespace separated and has the following format: "contig position strand" on each line, where position should be zero-based and strand should be "+" or "-".
