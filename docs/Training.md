@@ -63,9 +63,6 @@ git clone https://github.com/WGLab/DeepMod2.git ${DeepMod2_DIR}
 conda env create -f ${DeepMod2_DIR}/environment.yml
 conda activate deepmod2
 conda install samtools -y
-
-#switch to "general_motif" branch that currently has this experimental functionality
-git -C ${DeepMod2_DIR} checkout general_motif
 ```
 
 The above commands also install a generic version of PyTorch library for deep learning. If you want to use GPU for model training, make sure to install CUDA enabled version of Pytorch that is compatible with your GPU driver: https://pytorch.org/get-started/locally/.
