@@ -21,6 +21,61 @@ comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
 def revcomp(s):
     return ''.join(comp_base_map[x] for x in s[::-1])
 
+def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):    
+    is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
+
+    ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
+
+    common_pos=ref_motif_pos[(ref_motif_pos>=reference_start)&(ref_motif_pos<reference_end)]
+    aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
+
+    aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
+    aligned_pairs_read_wise_original=aligned_pairs[aligned_pairs[:,0]!=-1]
+    aligned_pairs_read_wise=np.copy(aligned_pairs_read_wise_original)
+    if not is_forward:
+        aligned_pairs_ref_wise=aligned_pairs_ref_wise[::-1]
+        aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
+        aligned_pairs_read_wise=aligned_pairs_read_wise[::-1]
+        aligned_pairs_read_wise[:,0]=read_length-aligned_pairs_read_wise[:,0]-1
+
+    return aligned_pairs_ref_wise, aligned_pairs_read_wise_original
+
+
+@jit(nopython=True)
+def get_aligned_pairs(cigar_tuples, ref_start):
+    alen=np.sum(cigar_tuples[:,0])
+    pairs=np.zeros((alen,2)).astype(np.int32)
+
+    i=0
+    ref_cord=ref_start-1
+    read_cord=-1
+    pair_cord=0
+    for i in range(len(cigar_tuples)):
+        len_op, op= cigar_tuples[i,0], cigar_tuples[i,1]
+        if op==0:
+            for k in range(len_op):            
+                ref_cord+=1
+                read_cord+=1
+
+                pairs[pair_cord,0]=read_cord
+                pairs[pair_cord,1]=ref_cord
+                pair_cord+=1
+
+        elif op==2:
+            for k in range(len_op):            
+                read_cord+=1            
+                pairs[pair_cord,0]=read_cord
+                pairs[pair_cord,1]=-1
+                pair_cord+=1
+
+        elif op==1:
+            for k in range(len_op):            
+                ref_cord+=1            
+                pairs[pair_cord,0]=-1
+                pairs[pair_cord,1]=ref_cord
+                pair_cord+=1
+    return pairs
+
 @jit(nopython=True)
 def get_ref_to_num(x):
     b=np.full((len(x)+1,4),fill_value=0,dtype=np.int8)
@@ -115,12 +170,12 @@ def get_pos(path):
                 if line[0] not in labelled_pos_list:
                     labelled_pos_list[line[0]]={0:{}, 1:{}}
                     
-                labelled_pos_list[line[0]][strand_map[line[2]]][int(line[1])]=int(line[3])
+                labelled_pos_list[line[0]][strand_map[line[2]]][int(line[1])]=float(line[3])
     
     return labelled_pos_list
 
-def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label):
-    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label)
+def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name):
+    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label, ref_coordinates=ref_coordinates, read_name=read_name, ref_name=ref_name)
                        
 def get_output(params, output_Q, process_event):
     output=params['output']
@@ -133,6 +188,7 @@ def get_output(params, output_Q, process_event):
     output_file_path=os.path.join(output,'%s.features.%d.npz' %(params['prefix'], chunk))
         
     mat, base_qual, base_seq, ref_seq, label=[], [], [], [], []
+    ref_coordinates, read_name, ref_name= [], [], []
     
     while True:
             if process_event.is_set() and output_Q.empty():
@@ -140,12 +196,16 @@ def get_output(params, output_Q, process_event):
             else:
                 try:
                     res = output_Q.get(block=False)
+                    #per_site_features, per_site_base_qual, per_site_base_seq, per_site_ref_seq, per_site_ref_coordinates, per_site_label, read_name_array, ref_name_array
                     
                     mat.append(res[0])
                     base_qual.append(res[1])
                     base_seq.append(res[2])
                     ref_seq.append(res[3])
-                    label.append(res[4])
+                    ref_coordinates.append(res[4])
+                    label.append(res[5])
+                    read_name.append(res[6])
+                    ref_name.append(res[7])
                     
                     read_count+=1
                    
@@ -154,7 +214,10 @@ def get_output(params, output_Q, process_event):
                         base_qual=np.vstack(base_qual)
                         base_seq=np.vstack(base_seq).astype(np.int8)
                         ref_seq=np.vstack(ref_seq).astype(np.int8)
-                        label=np.hstack(label).astype(np.int8)
+                        label=np.hstack(label).astype(np.float16)
+                        ref_coordinates=np.hstack(ref_coordinates)
+                        read_name=np.hstack(read_name)
+                        ref_name=np.hstack(ref_name)
                         
                         idx=np.random.permutation(np.arange(len(label)))
                         mat=mat[idx]
@@ -162,15 +225,19 @@ def get_output(params, output_Q, process_event):
                         base_seq=base_seq[idx]
                         ref_seq=ref_seq[idx]
                         label=label[idx]
+                        ref_coordinates=ref_coordinates[idx]
+                        read_name=read_name[idx]
+                        ref_name=ref_name[idx]
                         
                         print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
                         
                         
-                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label)
+                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name)
 
                         chunk+=1
                         output_file_path=os.path.join(output,'%s.features.%d.npz' %(params['prefix'], chunk))
                         mat, base_qual, base_seq, ref_seq, label=[], [], [], [], []
+                        ref_coordinates, read_name, ref_name= [], [], []
                         
                 except queue.Empty:
                     pass
@@ -180,29 +247,39 @@ def get_output(params, output_Q, process_event):
         base_qual=np.vstack(base_qual)
         base_seq=np.vstack(base_seq).astype(np.int8)
         ref_seq=np.vstack(ref_seq).astype(np.int8)
-        label=np.hstack(label).astype(np.int8)
-    
+        label=np.hstack(label).astype(np.float16)
+        ref_coordinates=np.hstack(ref_coordinates)
+        read_name=np.hstack(read_name)
+        ref_name=np.hstack(ref_name)
+
         idx=np.random.permutation(np.arange(len(label)))
-        
         mat=mat[idx]
         base_qual=base_qual[idx]
         base_seq=base_seq[idx]
         ref_seq=ref_seq[idx]
         label=label[idx]
+        ref_coordinates=ref_coordinates[idx]
+        read_name=read_name[idx]
+        ref_name=ref_name[idx]
 
         print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
 
-        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label)
+
+        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name)
 
     return
 
-def process(params, ref_seq_dict, signal_Q, output_Q, input_event):
+def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict, labelled_pos_list):
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
     window=params['window']
     window_range=np.arange(-window,window+1)
     
     div_threshold=params['div_threshold']
+    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':3, 'P':4, 'B':4}
+    cigar_pattern = r'\d+[A-Za-z]'
+    
+    ref_available=True if params['ref'] else False
     
     while True:
         if (signal_Q.empty() and input_event.is_set()):
@@ -211,59 +288,74 @@ def process(params, ref_seq_dict, signal_Q, output_Q, input_event):
         try:
             data=signal_Q.get(block=False)
             signal, move, read_dict, align_data=data
-            is_mapped, is_forward, ref_name, reference_start,reference_end, read_length,aligned_pairs_raw=align_data
-            aligned_pairs=np.array(aligned_pairs_raw)
-            aligned_pairs[aligned_pairs==None]=-1
-            aligned_pairs=aligned_pairs[aligned_pairs[:,0]!=-1]
-            aligned_pairs=aligned_pairs.astype(int)
 
-            ref_data=ref_seq_dict[ref_name][aligned_pairs[:, 1]] if is_forward else ref_seq_dict[ref_name][aligned_pairs[:, 1]][::-1]
-            label_pos=np.where(ref_data[:,3-is_forward]!=0)[0]
-            label_pos=label_pos[(label_pos>window) & (label_pos<read_length-window-1)]            
+            is_mapped, is_forward, ref_name, reference_start,reference_end, read_length=align_data
+
+            fq=read_dict['seq']
+            qual=read_dict['qual']
+            sequence_length=len(fq)
+            reverse= not is_forward
+            fq=revcomp(fq) if reverse else fq
+            qual=qual[::-1] if reverse else qual
+
+            if is_mapped and True:
+                cigar_tuples = np.array([(int(x[:-1]), cigar_map[x[-1]]) for x in re.findall(cigar_pattern, read_dict['cigar'])])
+                ref_start=int(read_dict['ref_pos'])-1
+                aligned_pairs=get_aligned_pairs(cigar_tuples, ref_start)
+            else:
+                continue
+
+            init_pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict)
+            init_pos_list_candidates=init_pos_list_candidates[(init_pos_list_candidates[:,0]>window)\
+                                                    &(init_pos_list_candidates[:,0]<sequence_length-window-1)] if len(init_pos_list_candidates)>0 else init_pos_list_candidates
             
-            if len(label_pos)==0:
+            if len(init_pos_list_candidates)==0:
                 continue
                 
-            init_label_range=(label_pos+(window_range[:,None])).transpose()
-            
-            ref_seq=ref_data[:,0] if is_forward else ref_data[:,1]
-            
-            fq=read_dict['seq'] if is_forward else revcomp(read_dict['seq'])
             base_seq=np.array([base_map[x] for x in fq])
+            ref_seq=ref_seq_dict[ref_name][:,1][read_to_ref_pairs[:, 1]][::-1] if reverse else ref_seq_dict[ref_name][:,0][read_to_ref_pairs[:, 1]]
+
             
-            #filter segments with poor alignment
-            ref_seq_filt=np.take(ref_seq, init_label_range, axis=0)
-            base_seq_filt=np.take(base_seq, init_label_range, axis=0)
-            segment_filter=np.mean(ref_seq_filt!=base_seq_filt,axis=1)<=div_threshold
-            label_pos=label_pos[segment_filter]
+            label_filter_idx=np.array([np.mean(ref_seq[candidate[0]-window: candidate[0]+window+1]!=\
+                                                base_seq[candidate[0]-window: candidate[0]+window+1])<=div_threshold \
+                                                for candidate in init_pos_list_candidates])
+            pos_list_candidates=init_pos_list_candidates[label_filter_idx]
             
-            if len(label_pos)==0:
+            
+            if len(pos_list_candidates)==0:
                 continue
-            
-            label_range=(label_pos+(window_range[:,None])).transpose()
-            
-            base_qual=read_dict['qual']  if is_forward else read_dict['qual'][::-1]
-            base_qual=1-10**((33-np.array([ord(x) for x in base_qual]))/10)
-            
+                
             if not move[0]:
                 try:
-                    tags={x.split(':')[0]:x for x in read_dict['tags']}
+                    tags={x.split(':')[0]:x for x in read_dict.pop('tags')}
                     start=int(tags['ts'].split(':')[-1])
                     mv=tags['mv'].split(',')
 
                     stride=int(mv[1])
-                    move_table=np.array([int(x) for x in mv[2:]])
+                    move_table=np.fromiter(mv[2:], dtype=np.int8)
                     move=(stride, start, move_table)
+                    read_dict['tags']=[x for x in tags.values() if x[:2] not in ['mv', 'ts', 'ML', 'MM']]
                 except KeyError:
+                    print('Read:%s no move table or stride or signal start found' %read_dict['name'])
+                    total_unprocessed_reads.append(read_dict)
                     continue
-
+                
+            base_qual=10**((33-np.array([ord(x) for x in qual]))/10)
+            mean_qscore=-10*np.log10(np.mean(base_qual))
+            base_qual=(1-base_qual)
             
-            label=ref_data[label_pos,3-is_forward]-1
             mat=get_events(signal, move)
             
+            per_site_features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+            per_site_base_qual=np.array([base_qual[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+            per_site_base_seq=np.array([base_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+            per_site_ref_seq=np.array([ref_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+            per_site_ref_coordinates=pos_list_candidates[:,1]
+            per_site_label=np.array([labelled_pos_list[ref_name][1-is_forward][coord] for coord in per_site_ref_coordinates])
+            read_name_array=np.array([read_dict['name'] for candidate in pos_list_candidates])
+            ref_name_array=np.array([ref_name for candidate in pos_list_candidates])
             
-            read_chunks=[np.take(x, label_range, axis=0) for x in [mat, base_qual, base_seq, ref_seq]]
-            read_chunks.append(label)
+            read_chunks=[per_site_features, per_site_base_qual, per_site_base_seq, per_site_ref_seq, per_site_ref_coordinates, per_site_label, read_name_array, ref_name_array]
                         
             output_Q.put(read_chunks)
 
@@ -320,7 +412,7 @@ def get_input(params, signal_Q, output_Q, input_event):
                                     move=(None,None,None)
                                 
                                 align_data=(bam_read.is_mapped if params['ref'] else False, 
-                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length, bam_read.aligned_pairs)
+                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
                         
@@ -348,7 +440,7 @@ def get_input(params, signal_Q, output_Q, input_event):
                                 read_dict=bam_read.to_dict()
                                 signal=read.signal
                                 align_data=(bam_read.is_mapped if params['ref'] else False, 
-                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length, bam_read.aligned_pairs)
+                                            bam_read.is_forward, bam_read.reference_name, bam_read.reference_start, bam_read.reference_end, bam_read.query_length)
                                 data=(signal, move, read_dict, align_data)
                                 signal_Q.put(data)
                             
@@ -365,6 +457,11 @@ def call_manager(params):
     
     print('%s: Getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     
+    ref_seq_dict={}
+    ref_pos_dict={}
+    
+    labelled_pos_list={}
+    
     if params['pos_list']:
         labelled_pos_list=get_pos(params['pos_list'])
         params['chrom']=[x for x in params['chrom'] if x in labelled_pos_list.keys()]
@@ -378,20 +475,18 @@ def call_manager(params):
         for r in res:
             chrom, seq_array, fwd_pos_array, rev_pos_array=r
             ref_seq_dict[chrom]=seq_array
-
-            if params['motif_seq']:
-                strand=0
-                for pos in fwd_pos_array:
-                    ref_seq_dict[chrom][pos,strand+2]=motif_label+1
-                    
-                strand=1
-                for pos in rev_pos_array:
-                    ref_seq_dict[chrom][pos,strand+2]=motif_label+1
+            
+            if params['pos_list']:
+                ref_pos_dict[chrom]=(np.array(sorted(list(labelled_pos_list[chrom][0].keys()))), np.array(sorted(list(labelled_pos_list[chrom][1].keys()))))
 
             else:
+                ref_pos_dict[chrom]=(fwd_pos_array, rev_pos_array)
+                labelled_pos_list[chrom]={0:{}, 1:{}}
                 for strand in [0,1]:
-                    for pos in labelled_pos_list[chrom][strand]:
-                        ref_seq_dict[chrom][pos,strand+2]=labelled_pos_list[chrom][strand][pos]+1
+                    for pos in ref_pos_dict[chrom][strand]:
+                        labelled_pos_list[chrom][strand][pos]=float(motif_label)
+                        
+                
                 
     print('%s: Finished getting motif positions from the reference.' %str(datetime.datetime.now()), flush=True)
     
@@ -408,7 +503,7 @@ def call_manager(params):
     handlers.append(input_process)
     
     for hid in range(max(1,params['threads']-1)):
-        p = mp.Process(target=process, args=(params, ref_seq_dict, signal_Q, output_Q, input_event));
+        p = mp.Process(target=process, args=(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict, labelled_pos_list));
         p.start();
         handlers.append(p);
     
@@ -474,7 +569,7 @@ if __name__ == '__main__':
 
         
      
-    if len(args.motif)>0:
+    if args.motif and len(args.motif)>0:
         if args.pos_list is not None:
             print('Use either --motif or --pos_list but not both', flush=True)
             sys.exit(3)

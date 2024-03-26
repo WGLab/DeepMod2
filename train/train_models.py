@@ -297,7 +297,7 @@ def generate_batches_mixed_can_mod(data_file_list, validation_type, validation_f
                 for group_files, group_batch_size in zip(data_file_list, batch_sizes)]
     
     
-    for multi_batch_data in itertools.zip_longest(*generators, fillvalue=[[],[],[],[]]):
+    for multi_batch_data in zip(*generators):
         batch_x=torch.vstack([d[0] for d in multi_batch_data if len(d[0])>0])
         batch_base_seq=torch.vstack([d[1] for d in multi_batch_data if len(d[1])>0])
         batch_ref_seq=torch.vstack([d[2] for d in multi_batch_data if len(d[2])>0])
