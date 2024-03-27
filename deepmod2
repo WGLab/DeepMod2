@@ -33,7 +33,7 @@ if __name__ == '__main__':
     
     detect_required=detect_parser.add_argument_group("Required Arguments")
     
-    detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based indices of nucleotides within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only. Multiple indices can be specified but they should refer to the same nucleotide letter.', nargs='*', default=['CG','0'])
+    detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based indices of nucleotides within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only. Multiple indices can be specified but they should refer to the same nucleotide letter. The motif and each index listed should be separated by whitespace, e.g. "--motif CGCG 0 2"', nargs='*', default=['CG','0'])
     
     detect_parser.add_argument("--mod_positions", help='A tab separated list of reference coordinates to call modification on. Modifications will only be called on reference positions specified that overlap with the motif, and no modification detection will be performed on other loci. The file shoule have the following format: "contig  position  strand" on each line. Position should be zero-based and strand should be "+" or "-".', default=None)
     
