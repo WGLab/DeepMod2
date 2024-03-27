@@ -524,7 +524,7 @@ if __name__ == '__main__':
 
     print('%s: Starting feature generation.' %str(datetime.datetime.now()))
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     parser.add_argument("--bam", help='Path to bam file', type=str, required=True)
     parser.add_argument("--window", help='Number of bases before or after the base of interest to include in the model. Total number of bases included in teh model will be 2xwindow+1.', type=int, default=10)
