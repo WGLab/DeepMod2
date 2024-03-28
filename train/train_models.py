@@ -373,7 +373,7 @@ def train(training_dataset, validation_dataset, validation_type, validation_frac
     else:
         dev = "cpu"
     
-    weight_counts=np.array([np.sum(np.eye(2)[np.load(f)['label']],axis=0) for f in itertools.chain.from_iterable(training_dataset)])
+    weight_counts=np.array([np.sum(np.eye(2)[np.load(f)['label'].astype(int)],axis=0) for f in itertools.chain.from_iterable(training_dataset)])
     weight_counts=np.sum(weight_counts,axis=0)
     
     
