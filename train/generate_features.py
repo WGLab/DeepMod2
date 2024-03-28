@@ -27,8 +27,6 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):
     ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
 
     common_pos=ref_motif_pos[(ref_motif_pos>=reference_start)&(ref_motif_pos<reference_end)]
-    if len(common_pos)==0:
-        return [], []
     aligned_pairs_ref_wise=aligned_pairs[aligned_pairs[:,1]!=-1][common_pos-reference_start]
 
     aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
@@ -80,7 +78,7 @@ def get_aligned_pairs(cigar_tuples, ref_start):
 
 @jit(nopython=True)
 def get_ref_to_num(x):
-    b=np.full((len(x)+1,4),fill_value=0,dtype=np.int8)
+    b=np.full((len(x)+1,2),fill_value=0,dtype=np.int8)
     
     for i,l in enumerate(x):
         if l=='A':
@@ -120,8 +118,8 @@ def get_ref_info(args):
         fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])
         rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])
 
-        fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind]))))
-        rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind]))))
+        fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind])))).astype(int)
+        rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind])))).astype(int)
     
     return chrom, seq_array, fwd_pos_array, rev_pos_array
 
@@ -308,8 +306,6 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
                 continue
 
             init_pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict)
-            if len(init_pos_list_candidates)==0:
-                continue
             init_pos_list_candidates=init_pos_list_candidates[(init_pos_list_candidates[:,0]>window)\
                                                     &(init_pos_list_candidates[:,0]<sequence_length-window-1)] if len(init_pos_list_candidates)>0 else init_pos_list_candidates
             
@@ -481,7 +477,7 @@ def call_manager(params):
             ref_seq_dict[chrom]=seq_array
             
             if params['pos_list']:
-                ref_pos_dict[chrom]=(np.array(sorted(list(labelled_pos_list[chrom][0].keys()))), np.array(sorted(list(labelled_pos_list[chrom][1].keys()))))
+                ref_pos_dict[chrom]=(np.array(sorted(list(labelled_pos_list[chrom][0].keys()))).astype(int), np.array(sorted(list(labelled_pos_list[chrom][1].keys()))).astype(int))
 
             else:
                 ref_pos_dict[chrom]=(fwd_pos_array, rev_pos_array)
