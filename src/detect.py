@@ -94,7 +94,11 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, motif_seq,
     
     else:
         base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
-        motif_id=np.array([[m.start(0)+motif_ind,-1] for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        
+        motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        motif_id=np.array(sorted(list(set.union(*[set(motif_anchor+i) for i in motif_ind]))))
+        motif_id=np.vstack([motif_id,-1*np.ones(len(motif_id))]).T.astype(int)
+        
         return (base_id, motif_id, None)
 
 def per_site_info(data):
