@@ -55,13 +55,13 @@ def get_events(signal, move):
 
     return data
 
-def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, motif_seq, motif_base, motif_ind, position_based):    
+def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, exp_motif_seq, motif_base, motif_ind, position_based):    
     if align_data[0]:
         is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
         
-        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
+        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'(?={})'.format(motif_base), read_seq))}
         
-        motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(exp_motif_seq), read_seq)])
         motif_id=np.array(sorted(list(set.union(*[set(motif_anchor+i) for i in motif_ind]))))
         
         ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
@@ -93,9 +93,9 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, motif_seq,
             return base_id, aligned_pairs_ref_wise, aligned_pairs_read_wise_original
     
     else:
-        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'{}'.format(motif_base), read_seq))}
+        base_id={m.start(0):i for i,m in enumerate(re.finditer(r'(?={})'.format(motif_base), read_seq))}
         
-        motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), read_seq)])
+        motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(exp_motif_seq), read_seq)])
         motif_id=np.array(sorted(list(set.union(*[set(motif_anchor+i) for i in motif_ind]))))
         motif_id=np.vstack([motif_id,-1*np.ones(len(motif_id))]).T.astype(int)
         
@@ -406,14 +406,24 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     
     dev=params['dev']
     motif_seq=params['motif_seq']
+    exp_motif_seq=params['exp_motif_seq']
     motif_base=motif_seq[params['motif_ind'][0]]
     motif_ind=params['motif_ind']
-    mod_symbol='m' if motif_seq=='CG' else motif_base
+    
+    if params['mod_symbol']:
+        mod_symbol=params['mod_symbol']
+    elif motif_seq=='CG':
+        mod_symbol='m'
+    else:
+        mod_symbol=motif_base
+    
+    seq_type=params['seq_type']
+    
     position_based=params['position_based']
     
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
-    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':3, 'P':4, 'B':4}
+    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':1, 'P':4, 'B':4}
     cigar_pattern = r'\d+[A-Za-z]'
     
     model, model_config=get_model(params)
@@ -473,7 +483,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                     aligned_pairs=None
 
 
-                pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict, motif_seq, motif_base, motif_ind, position_based)
+                pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict, exp_motif_seq, motif_base, motif_ind, position_based)
 
                 pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
                                                         &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
@@ -509,6 +519,8 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                     per_site_ref_seq=np.array([dummy_ref_seq for candidate in pos_list_candidates])
 
                 mat=get_events(signal, move)
+                if seq_type=='rna':
+                    mat=np.flip(mat,axis=0)
                 mat=np.hstack((mat, base_qual))
 
                 try:

@@ -273,7 +273,7 @@ def generate_batches(files, validation_type, validation_fraction, data_type, bat
         data=read_from_file(file_name, validation_type, validation_fraction, data_type)
 
         features, base_seq, ref_seq, labels=data
-        
+        batch_size=max(batch_size,1)
         for local_index in range(0, labels.shape[0], batch_size):
             batch_x=features[local_index:(local_index + batch_size)]
             batch_base_seq=base_seq[local_index:(local_index + batch_size)]
@@ -288,7 +288,7 @@ def generate_batches(files, validation_type, validation_fraction, data_type, bat
 def generate_batches_mixed_can_mod(data_file_list, validation_type, validation_fraction, data_type, batch_size=128):
     
     data_file_list=[x for x in data_file_list if len(x)!=0]
-    
+
     sizes=np.array([sum(len(np.load(f)['label']) for f in data) for data in data_file_list])
     batch_sizes=(batch_size*sizes/np.sum(sizes)).astype(int)
     batch_sizes[0]=batch_sizes[0]+batch_size-np.sum(batch_sizes)
@@ -587,6 +587,13 @@ if __name__=='__main__':
     seed =random.randint(0, 0xffff_ffff_ffff_ffff) if args.seed is None else int(args.seed)
     
     training_dataset = [mixed_training_dataset, can_training_dataset, mod_training_dataset]
+    
+    with open(os.path.join(args.model_save_path,'args'),'w') as file:
+        file.write('Command: python %s\n\n\n' %(' '.join(sys.argv)))
+        file.write('------Parameters Used For Running DeepMod2------\n')
+        for k in vars(args):
+            file.write('{}: {}\n'.format(k,vars(args)[k]) )
+            
     res=train(training_dataset, validation_dataset, validation_type, validation_fraction, model_config, epochs=args.epochs,prefix=args.prefix, retrain=args.retrain, batch_size=args.batch_size, args_str=args_str, seed=seed)
     
     print('Time taken=%.4f' %(time.time()-start_time), flush=True)

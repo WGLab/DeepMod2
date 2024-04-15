@@ -35,10 +35,13 @@ if __name__ == '__main__':
     
     detect_parser.add_argument("--motif", help='Motif for detecting modifications followed by zero-based indices of nucleotides within the motif to call modification on. Default is CpG methylation "CG 0". Modification will be called for motif matches on the read and reference unless --reference_motif_only is used to restrict to reference motif matches only. Multiple indices can be specified but they should refer to the same nucleotide letter. The motif and each index listed should be separated by whitespace, e.g. "--motif CGCG 0 2"', nargs='*', default=['CG','0'])
     
+    detect_parser.add_argument("--mod_symbol", help='Symbol to use for modified base in BAM tag MM. Default is to use "m" for 5mC in CG motif, and for other motifs the default is the canonical nucleotide symbol.' , type=str)
+    
     detect_parser.add_argument("--mod_positions", help='A tab separated list of reference coordinates to call modification on. Modifications will only be called on reference positions specified that overlap with the motif, and no modification detection will be performed on other loci. The file shoule have the following format: "contig  position  strand" on each line. Position should be zero-based and strand should be "+" or "-".', default=None)
     
     detect_parser.add_argument("--reference_motif_only", help='Restrict modification calling to reference motif matches only', default=False, action='store_true')
     
+    detect_parser.add_argument("--seq_type", help='Specify DNA or direct RNA sequencing.',choices=['dna','rna'], type=str,required=True)
     
     detect_parser.add_argument("--threads", help='Number of threads to use for processing signal and running model inference. If a GPU is used for inference, then --threads number of threads will be running on GPU concurrently. The total number of threads used by DeepMod2 is equal to --threads plus --bam_threads. It is recommended to run DeepMod2 with mutliple cores, and use at least 4 bam_threads for compressing BAM file.',type=int, default=4)
      
@@ -66,7 +69,7 @@ if __name__ == '__main__':
     detect_parser.add_argument("--batch_size", help='Batch size to use for GPU inference. For CPU inference, batch size is fixed at 512.',type=int, default=1024)
     
     detect_parser.add_argument("--bam_threads", help='Number of threads to use for compressed BAM output. Setting it lower than 4 can significantly lower the runtime.',type=int, default=4)
-    detect_parser.add_argument("--skip_unmapped", help='Skip unmapped reads from methylation calling', default=False, action='store_true')
+    detect_parser.add_argument("--skip_unmapped", help='Skip unmapped reads from methylation calling. If --chrom is used then unmapped are automatically skipped.', default=False, action='store_true')
     
     merge_parser = main_subparsers.add_parser("merge", parents=[parent_parser],
                                       add_help=True,
@@ -121,6 +124,7 @@ if __name__ == '__main__':
         
     else:        
         if args.chrom:
+            args.skip_unmapped=True
             chrom_list=args.chrom
         else:
             chrom_list=pysam.AlignmentFile(args.bam,'rb',check_sq=False).references
@@ -134,18 +138,9 @@ if __name__ == '__main__':
                 dev = "cpu"
                 
 
-
-        if len(args.motif)<2 or len(set(args.motif[0])-set('ACGT'))>0 or  all([a.isnumeric() for a in args.motif[1:]])==False:
-            print('--motif not specified correctly', len(args.motif)<2, len(set(args.motif[0])-set('ACGT'))==0, all([a.isnumeric() for a in args.motif[1:]])==False,flush=True)
-            sys.exit(3)
-            
-        else:
-            motif=args.motif[0]
-            motif_ind=[int(x) for x in args.motif[1:]]
-            if len(set(motif[x] for x in motif_ind))!=1:
-                print('motif base should be same for all indices', flush=True)
-                sys.exit(3)
-                
+        motif_seq, exp_motif_seq, motif_ind, valid_motif=utils.motif_check(args.motif)
+        if not valid_motif:
+            sys.exit(3)                
             
         params={'input':args.input, 'output':args.output, 'threads':args.threads, 
                 'prefix':args.prefix, 'model':args.model, 
@@ -158,8 +153,10 @@ if __name__ == '__main__':
                 'disable_pruning':args.disable_pruning, 'batch_size':args.batch_size, 
                 'exclude_ref_features':args.exclude_ref_features,'bam_threads':args.bam_threads,
                 'skip_unmapped':args.skip_unmapped, 'mod_positions':args.mod_positions,
-                'motif_seq':motif, 'motif_ind':motif_ind,
-                'reference_motif_only':args.reference_motif_only
+                'motif_seq':motif_seq, 'motif_ind':motif_ind,'exp_motif_seq':exp_motif_seq,
+                'reference_motif_only':args.reference_motif_only,
+                'seq_type':args.seq_type,
+                'mod_symbol':args.mod_symbol
                 }
 
         print('\n%s: \nCommand: python %s\n' %(str(datetime.datetime.now()), ' '.join(sys.argv)), flush=True)

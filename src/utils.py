@@ -45,7 +45,7 @@ model_dict={
                                   'model_config_path':'models/transformer.cfg'}, 
 }
 
-comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
+comp_base_map={'A':'T','T':'A','C':'G','G':'C','[':']', ']':'['}
 
 def revcomp(s):
     return ''.join(comp_base_map[x] for x in s[::-1])
@@ -97,7 +97,7 @@ def get_model(params):
         return model, model_config
 
     elif model_config['model_type']=='transformer':
-        net = TransformerModel(model_dims=model_config['model_dims'], num_layers=model_config['num_layers'], \
+        model = TransformerModel(model_dims=model_config['model_dims'], num_layers=model_config['num_layers'], \
                      dim_feedforward=model_config['dim_feedforward'], \
                      num_fc=model_config['num_fc'], embedding_dim=model_config['embedding_dim'], \
                      embedding_type=model_config['embedding_type'], include_ref=model_config['include_ref'],\
@@ -223,16 +223,61 @@ def get_pos(path):
     
     return labelled_pos_list
 
+def motif_check(motif):
+    nt_dict={'R': 'GA',
+             'Y': 'CT',
+             'K': 'GT',
+             'M': 'AC',
+             'S': 'GC',
+             'W': 'AT',
+             'B': 'GTC',
+             'D': 'GAT',
+             'H': 'ACT',
+             'V': 'GCA',
+             'N': 'AGCT'}
+    
+    valid_alphabet=set(nt_dict.keys()).union({'A', 'C', 'G', 'T'})
+    
+    exp_motif_seq, final_motif_ind, valid = None, None, False
+    
+    if len(motif)<2:
+        print('--motif not specified correctly. You need to specify a motif and at least one index',flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    elif len(set(motif[0])-valid_alphabet)>0:
+        print('--motif not specified correctly. Motif should only consist of the following extended nucleotide letters: {}'.format(','.join(valid_alphabet)),flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    elif all([a.isnumeric() for a in motif[1:]])==False:
+        print('--motif not specified correctly. Motif indices should be integers separated by whitespace and shoud come after the motif sequence.',flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    else:
+        motif_seq=motif[0]
+        motif_ind=[int(x) for x in motif[1:]]
+        
+        if len(set(motif_seq[x] for x in motif_ind))!=1 or len(set(motif_seq[x] for x in motif_ind)-set('ACGT'))>0:
+            print('Base of interest should be same for all indices and must be one of A, C, G or T.', flush=True)
+            return motif_seq, exp_motif_seq, final_motif_ind, valid
+        
+        else:
+            exp_motif_seq=motif_seq
+            for nt in nt_dict:
+                if nt in exp_motif_seq:
+                    exp_motif_seq=exp_motif_seq.replace(nt, '[{}]'.format(nt_dict[nt]))
+            return motif_seq, exp_motif_seq, motif_ind, True
+
 def get_ref_info(args):
     params, chrom=args
     motif_seq, motif_ind=params['motif_seq'], params['motif_ind']
+    exp_motif_seq=params['exp_motif_seq']
     ref_fasta=pysam.FastaFile(params['ref'])
     seq=ref_fasta.fetch(chrom).upper()
     seq_array=get_ref_to_num(seq)
     
     
-    fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])
-    rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])
+    fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(exp_motif_seq), seq)])
+    rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(revcomp(exp_motif_seq)), seq)])
 
     fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind])))).astype(int)
     rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind])))).astype(int)

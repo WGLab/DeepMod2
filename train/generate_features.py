@@ -16,12 +16,56 @@ base_to_num_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3,'N':4}
 
 num_to_base_map={0:'A', 1:'C', 2:'G', 3:'T', 4:'N'}
 
-comp_base_map={'A':'T','T':'A','C':'G','G':'C'}
+comp_base_map={'A':'T','T':'A','C':'G','G':'C','[':']', ']':'['}
 
 def revcomp(s):
     return ''.join(comp_base_map[x] for x in s[::-1])
 
-def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):    
+def motif_check(motif):
+    nt_dict={'R': 'GA',
+             'Y': 'CT',
+             'K': 'GT',
+             'M': 'AC',
+             'S': 'GC',
+             'W': 'AT',
+             'B': 'GTC',
+             'D': 'GAT',
+             'H': 'ACT',
+             'V': 'GCA',
+             'N': 'AGCT'}
+    
+    valid_alphabet=set(nt_dict.keys()).union({'A', 'C', 'G', 'T'})
+    
+    exp_motif_seq, final_motif_ind, valid = None, None, False
+    
+    if len(motif)<2:
+        print('--motif not specified correctly. You need to specify a motif and at least one index',flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    elif len(set(motif[0])-valid_alphabet)>0:
+        print('--motif not specified correctly. Motif should only consist of the following extended nucleotide letters: {}'.format(','.join(valid_alphabet)),flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    elif all([a.isnumeric() for a in motif[1:]])==False:
+        print('--motif not specified correctly. Motif indices should be integers separated by whitespace and shoud come after the motif sequence.',flush=True)
+        return motif_seq, exp_motif_seq, final_motif_ind, valid
+    
+    else:
+        motif_seq=motif[0]
+        motif_ind=[int(x) for x in motif[1:]]
+        
+        if len(set(motif_seq[x] for x in motif_ind))!=1 or len(set(motif_seq[0])-set('ACGT'))>0:
+            print('Base of interest should be same for all indices and must be one of A, C, G or T.', flush=True)
+            return motif_seq, exp_motif_seq, final_motif_ind, valid
+        
+        else:
+            exp_motif_seq=motif_seq
+            for nt in nt_dict:
+                if nt in exp_motif_seq:
+                    exp_motif_seq=exp_motif_seq.replace(nt, '[{}]'.format(nt_dict[nt]))
+            return motif_seq, exp_motif_seq, motif_ind, True
+        
+def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict, ):    
     is_mapped, is_forward, ref_name, reference_start, reference_end, read_length=align_data
 
     ref_motif_pos=ref_pos_dict[ref_name][0] if is_forward else ref_pos_dict[ref_name][1]
@@ -32,10 +76,11 @@ def get_candidates(read_seq, align_data, aligned_pairs, ref_pos_dict):
     aligned_pairs_ref_wise=aligned_pairs_ref_wise[aligned_pairs_ref_wise[:,0]!=-1]
     aligned_pairs_read_wise_original=aligned_pairs[aligned_pairs[:,0]!=-1]
     aligned_pairs_read_wise=np.copy(aligned_pairs_read_wise_original)
+
     if not is_forward:
         aligned_pairs_ref_wise=aligned_pairs_ref_wise[::-1]
-        aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
         aligned_pairs_read_wise=aligned_pairs_read_wise[::-1]
+        aligned_pairs_ref_wise[:,0]=read_length-aligned_pairs_ref_wise[:,0]-1
         aligned_pairs_read_wise[:,0]=read_length-aligned_pairs_read_wise[:,0]-1
 
     return aligned_pairs_ref_wise, aligned_pairs_read_wise_original
@@ -109,14 +154,15 @@ def get_ref_to_num(x):
 def get_ref_info(args):
     params, chrom=args
     motif_seq, motif_ind=params['motif_seq'], params['motif_ind']
+    exp_motif_seq=params['exp_motif_seq']
     ref_fasta=pysam.FastaFile(params['ref'])
     seq=ref_fasta.fetch(chrom).upper()
     seq_array=get_ref_to_num(seq)
     
     fwd_pos_array, rev_pos_array=None, None
     if motif_seq:
-        fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(motif_seq), seq)])
-        rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(motif_seq)), seq)])
+        fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(exp_motif_seq), seq)])
+        rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(exp_motif_seq)), seq)])
 
         fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind])))).astype(int)
         rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind])))).astype(int)
@@ -276,9 +322,10 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
     window_range=np.arange(-window,window+1)
     
     div_threshold=params['div_threshold']
-    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':3, 'P':4, 'B':4}
+    cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':1, 'P':4, 'B':4}
     cigar_pattern = r'\d+[A-Za-z]'
     
+    seq_type=params['seq_type']
     ref_available=True if params['ref'] else False
     
     while True:
@@ -297,7 +344,7 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
             reverse= not is_forward
             fq=revcomp(fq) if reverse else fq
             qual=qual[::-1] if reverse else qual
-
+                
             if is_mapped and True:
                 cigar_tuples = np.array([(int(x[:-1]), cigar_map[x[-1]]) for x in re.findall(cigar_pattern, read_dict['cigar'])])
                 ref_start=int(read_dict['ref_pos'])-1
@@ -310,6 +357,7 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
                                                     &(init_pos_list_candidates[:,0]<sequence_length-window-1)] if len(init_pos_list_candidates)>0 else init_pos_list_candidates
             
             if len(init_pos_list_candidates)==0:
+                
                 continue
                 
             base_seq=np.array([base_map[x] for x in fq])
@@ -346,6 +394,9 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
             
             mat=get_events(signal, move)
             
+            if seq_type=='rna':
+                mat=np.flip(mat,axis=0)
+                
             per_site_features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
             per_site_base_qual=np.array([base_qual[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
             per_site_base_seq=np.array([base_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
@@ -543,7 +594,9 @@ if __name__ == '__main__':
     
     parser.add_argument("--pos_list", help='Text file containing a list of positions to generate features for. Use either --pos_list or --motif to specify how to choose loci for feature generation, but not both. The file should be whitespace separated with the following information on each line: chrom pos strand label. The position is 0-based reference coordinate, strand is + for forward and - for negative strand; label is 1 for mod, 0 for unmod).', type=str)
     
-    parser.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str, default='fast5',required=True)
+    parser.add_argument("--file_type", help='Specify whether the signal is in FAST5 or POD5 file format. If POD5 file is used, then move table must be in BAM file.',choices=['fast5','pod5'], type=str,required=True)
+    
+    parser.add_argument("--seq_type", help='Specify DNA or direct RNA sequencing.',choices=['dna','rna'], type=str,required=True)
     
     parser.add_argument("--guppy_group", help='Name of the guppy basecall group',type=str, default='Basecall_1D_000')
     parser.add_argument("--chrom", nargs='*',  help='A space/whitespace separated list of contigs, e.g. chr3 chr6 chr22. If not list is provided then all chromosomes in the reference are used.')
@@ -577,32 +630,29 @@ if __name__ == '__main__':
         if args.motif_label is None:
             print('--motif_label should be specified with --motif option', flush=True)
             sys.exit(3)
+        
+        motif_seq, exp_motif_seq, motif_ind, valid_motif=utils.motif_check(args.motif)
+        if not valid_motif:
+            sys.exit(3) 
             
-        if len(args.motif)<2 or len(set(args.motif[0])-set('ACGT'))>0 or  all([a.isnumeric() for a in args.motif[1:]])==False:
-            print('--motif not specified correctly', len(args.motif)<2, len(set(args.motif[0])-set('ACGT'))==0, all([a.isnumeric() for a in args.motif[1:]])==False,flush=True)
-            sys.exit(3)
-
-        else:
-            motif=args.motif[0]
-            motif_ind=[int(x) for x in args.motif[1:]]
-            if len(set(motif[x] for x in motif_ind))!=1:
-                print('motif base should be same for all indices', flush=True)
-                sys.exit(3)
     else:
         motif=None
         motif_ind=None
+        exp_motif_seq=None
         
         if args.pos_list is None:
             print('Use either --motif or --pos_list', flush=True)
             sys.exit(3)
             
     params=dict(bam=args.bam, 
+            seq_type=args.seq_type,
             window=args.window,
             pos_list=args.pos_list, 
             ref=args.ref, 
             input=args.input,
             motif_seq=motif,
             motif_ind=motif_ind,
+            exp_motif_seq=exp_motif_seq,
             motif_label=args.motif_label,
             file_type=args.file_type,
             guppy_group=args.guppy_group,
@@ -613,6 +663,12 @@ if __name__ == '__main__':
             div_threshold=args.div_threshold, reads_per_chunk=args.reads_per_chunk)
     
     print(args)
-    call_manager(params)
     
+    
+    with open(os.path.join(args.output,'args'),'w') as file:
+        file.write('Command: python %s\n\n\n' %(' '.join(sys.argv)))
+        file.write('------Parameters Used For Running DeepMod2------\n')
+        for k in vars(args):
+            file.write('{}: {}\n'.format(k,vars(args)[k]) )
+    call_manager(params)
     print('\n%s: Time elapsed=%.4fs' %(str(datetime.datetime.now()),time.time()-t))
