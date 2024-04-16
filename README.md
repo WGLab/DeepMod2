@@ -10,8 +10,8 @@ Ahsan, M.U., Gouru, A., Chan, J. et al. A signal processing and deep learning fr
 ## Installation
 Please refer to [Installation](https://github.com/WGLab/DeepMod2/blob/main/docs/Install.md) for how to install DeepMod2.
 
-## Usage
-Quick usage guide:
+## Inference
+Quick usage guide for model inference:
 1. Basecall your FAST5/POD5 files with Dorado (using `--emit-moves`) or Guppy (using `--bam_out --moves_out`) parameters to get a BAM file with move tables:
    ```
    dorado basecaller MODEL INPUT_DIR --emit-moves > basecall.bam
@@ -48,8 +48,13 @@ Quick usage guide:
 <p align="center"> <img src="https://github.com/WGLab/DeepMod2/assets/35819083/c693ab27-f218-4478-9780-c027f740999d"  width="75%" > </p>
 
 
-Please refer to [Usage](https://github.com/WGLab/DeepMod2/blob/main/docs/Usage.md) for details on how to use DeepMod2.
+Please refer to [Usage.md](docs/Usage.md) for details on how to use DeepMod2.
 
+## Training
+For a detailed usage guide for model training, refer to [Training.md](docs/Training.md) and the code under [train](train/).
+
+## Signal Plotting
+For a detailed usage guide for signal plotting and comparison, refer to [Signal_Plot_Examples.ipynb](plot_utils/Signal_Plot_Examples.ipynb) and the code under [plot_utils](plot_utils/).
 
 ## Models
 The following models for 5mC detection in CpG motif are provided in the repository. Use `--model MODEL_NAME` to specify a model to use. You only need to provide the name of the model, not the path to it. Each model is compatible with a different Dorado or Guppy basecalling model version.
