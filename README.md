@@ -54,7 +54,7 @@ Please refer to [Usage.md](docs/Usage.md) for details on how to use DeepMod2.
 For a detailed usage guide for model training, refer to [Training.md](docs/Training.md) and the code under [train](train/).
 
 ## Signal Plotting
-For a detailed usage guide for signal plotting and comparison, refer to [Signal_Plot_Examples.ipynb](plot_utils/Signal_Plot_Examples.ipynb) and the code under [plot_utils](plot_utils/). The code works with signal files in POD5 format and aligned BAM files with move tables.
+For a detailed usage guide for signal plotting and comparison, refer to the Jupyter notebook [Signal_Plot_Examples.ipynb](plot_utils/Signal_Plot_Examples.ipynb) and the code under [plot_utils](plot_utils/). The code works with signal files in POD5 format and aligned BAM files with move tables. The Jupyter notebook uses the following data: [plot_files.tar.gz](https://github.com/WGLab/DeepMod2/files/14985308/plot_files.tar.gz).
 
 ## Models
 The following models for 5mC detection in CpG motif are provided in the repository. Use `--model MODEL_NAME` to specify a model to use. You only need to provide the name of the model, not the path to it. Each model is compatible with a different Dorado or Guppy basecalling model version.
