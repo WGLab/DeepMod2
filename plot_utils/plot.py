@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import os, pysam
 import pandas as pd
-
+from scipy import stats
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
@@ -261,7 +261,7 @@ def violin_plot(sample_data, avg_type='median', static_display=False, meanline_v
     return 
     
     
-def compare_violin_plot(sample1_data, sample2_data, label1='Mod', label2='Unmod', avg_type='median', static_display=False, meanline_visible=False, figure_width=1000, figure_height=500, save_path=None):
+def compare_violin_plot(sample1_data, sample2_data, label1='Mod', label2='Unmod', avg_type='median', static_display=False, meanline_visible=False, figure_width=1000, figure_height=500, save_path=None, test_type='mw', test_method="auto", display_pval=True):
     tmp_dict=dict(sample1_data)
     tmp_dict.update(sample2_data)
     cons_seq=get_consensus(tmp_dict)
@@ -317,9 +317,25 @@ def compare_violin_plot(sample1_data, sample2_data, label1='Mod', label2='Unmod'
                             meanline_visible=meanline_visible)
                  )
     
+    
+    group_df=df.groupby(['Position', 'Sample'])['Signal'].apply(list)
+    dist_stats={}
+    for i in range(len(group_df)//2):
+        if test_type=='ks':
+            s=stats.ks_2samp(group_df.loc[i,:].loc[label1], group_df.loc[i,:].loc[label2], method=test_method)
+        elif test_type=="mw":
+            s=stats.mannwhitneyu(group_df.loc[i,:].loc[label1], group_df.loc[i,:].loc[label2], method=test_method)
+        dist_stats[i]={'Position':i,'Base':cons_seq[i],'Statistic':s.statistic, 'Pvalue':s.pvalue}
+
+    dist_stats_df=pd.DataFrame(dist_stats).T
+    dist_stats_df=dist_stats_df.astype({'Position': 'int', 'Statistic': 'float32', 'Pvalue': 'float32',})
+
     tickvals=np.arange(0,len(cons_seq))
-    ticktext=['%d<br>%s' %(a-len(cons_seq)//2,b) for a,b in zip(tickvals, cons_seq)]
-    fig.update_xaxes(tickmode='array', tickvals=tickvals, ticktext=ticktext)
+    if display_pval:
+        ticktext=['{}<br>{}<br>{:0.1e}'.format(a-len(cons_seq)//2,b,c) for a,b,c in zip(tickvals, cons_seq, dist_stats_df.Pvalue)]
+    else:
+        ticktext=['%d<br>%s' %(a-len(cons_seq)//2,b) for a,b in zip(tickvals, cons_seq)]
+    fig.update_xaxes(tickmode='array', tickvals=tickvals, ticktext=ticktext,tickfont = dict(size = 8))
     fig.update_layout(violingap=0, violinmode='overlay')
     
     if static_display:
@@ -332,7 +348,7 @@ def compare_violin_plot(sample1_data, sample2_data, label1='Mod', label2='Unmod'
             fig.write_html(save_path)
         fig.show()
     
-    return 
+    return dist_stats_df
 
 
 def revcomp(s):
@@ -419,10 +435,13 @@ def get_read_signal_raw(signal, move,norm_type):
 
     return norm_signal, base_level_data
 
-def get_signals(bam_path, chrom, pos, strand, read_filename_dict, base_path, seq_type, max_cov=1000, window=10, norm_type='STD'):
+def get_signals(bam_path, chrom, pos, strand, read_filename_dict, base_path, seq_type, max_cov=1000, window_before=10, window_after=10, norm_type='STD'):
     read_info=get_read_positions(bam_path, chrom, pos, strand,seq_type)
     data={}
     
+    if seq_type=='rna':
+        window_before, window_after=window_after, window_before
+        
     cov=0
     for read_name in read_info.keys():
         if cov > max_cov:
@@ -455,13 +474,13 @@ def get_signals(bam_path, chrom, pos, strand, read_filename_dict, base_path, seq
                 
                 if seq_type=='rna':
                     fq=fq[::-1]
-                
+                    
                 norm_signal, base_level_data = get_read_signal_raw(signal, move, norm_type)
                 seq_len=len(fq)
                 
-                if read_pos>window+5 and read_pos<seq_len-window-1-5:
+                if read_pos>window_before+5 and read_pos<seq_len-window_after-1-5:
                     cov+=1
-                    base_seq=fq[read_pos-window : read_pos+window+1]
+                    base_seq=fq[read_pos-window_before : read_pos+window_after+1]
                     
                     data[read_name]={}
                     
@@ -469,14 +488,13 @@ def get_signals(bam_path, chrom, pos, strand, read_filename_dict, base_path, seq
                     
                     if seq_type=='dna':
                         data[read_name]['seq']=base_seq
-                        for x in range(read_pos-window, read_pos+window+1):
+                        for x in range(read_pos-window_before, read_pos+window_after+1):
                             norm.append(np.array(norm_signal[base_level_data[x][0]:base_level_data[x][0]+base_level_data[x][1]]))
                         data[read_name]['signal']=norm
                         
                     elif seq_type=='rna':
                         data[read_name]['seq']=base_seq[::-1]
-                        
-                        for x in range(read_pos-window, read_pos+window+1):
+                        for x in range(read_pos-window_before, read_pos+window_after+1):
                             norm.append(np.array(norm_signal[base_level_data[x][0]:base_level_data[x][0]+base_level_data[x][1]][::-1]))
                         data[read_name]['signal']=norm[::-1]
 

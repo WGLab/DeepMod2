@@ -446,7 +446,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     total_ref_seq_list=[]
     r_count=0
     
-    dummy_ref_seq=4+np.zeros(21)
+    dummy_ref_seq=4+np.zeros(2*window+1)
     
     ref_available=True if params['ref'] else False
     
@@ -551,7 +551,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                 base_seq_list=np.vstack(total_base_seq_list)
                 ref_seq_list=np.vstack(total_ref_seq_list)
                 
-                pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, ref_seq=ref_seq_list, batch_size = chunk_size)]
+                pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, window, ref_seq=ref_seq_list, batch_size = chunk_size)]
 
                                 
                 pred_list=np.vstack(pred_list)
@@ -575,7 +575,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
         base_seq_list=np.vstack(total_base_seq_list)
         ref_seq_list=np.vstack(total_ref_seq_list)
         
-        pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, ref_seq=ref_seq_list, batch_size = chunk_size)]
+        pred_list=[model(batch_x.to(dev), batch_base_seq.to(dev), batch_ref_seq.to(dev)).cpu().numpy() for batch_x, batch_base_seq, batch_ref_seq in generate_batches(features_list, base_seq_list, window, ref_seq=ref_seq_list, batch_size = chunk_size)]
 
         pred_list=np.vstack(pred_list)
         pred_list=np.split(pred_list.ravel(), read_counts)

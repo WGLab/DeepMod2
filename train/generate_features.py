@@ -10,7 +10,7 @@ from ont_fast5_api.fast5_interface import get_fast5_file
 from numba import jit
 import queue, gzip
 import pod5 as p5
-
+import utils
 
 base_to_num_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3,'N':4}
 
@@ -54,7 +54,7 @@ def motif_check(motif):
         motif_seq=motif[0]
         motif_ind=[int(x) for x in motif[1:]]
         
-        if len(set(motif_seq[x] for x in motif_ind))!=1 or len(set(motif_seq[0])-set('ACGT'))>0:
+        if len(set(motif_seq[x] for x in motif_ind))!=1 or len(set(motif_seq[x] for x in motif_ind)-set('ACGT'))>0:
             print('Base of interest should be same for all indices and must be one of A, C, G or T.', flush=True)
             return motif_seq, exp_motif_seq, final_motif_ind, valid
         
@@ -161,8 +161,8 @@ def get_ref_info(args):
     
     fwd_pos_array, rev_pos_array=None, None
     if motif_seq:
-        fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(exp_motif_seq), seq)])
-        rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'{}'.format(revcomp(exp_motif_seq)), seq)])
+        fwd_motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(exp_motif_seq), seq)])
+        rev_motif_anchor=np.array([m.start(0) for m in re.finditer(r'(?={})'.format(revcomp(exp_motif_seq)), seq)])
 
         fwd_pos_array=np.array(sorted(list(set.union(*[set(fwd_motif_anchor+i) for i in motif_ind])))).astype(int)
         rev_pos_array=np.array(sorted(list(set.union(*[set(rev_motif_anchor+len(motif_seq)-1-i) for i in motif_ind])))).astype(int)
@@ -170,12 +170,18 @@ def get_ref_info(args):
     return chrom, seq_array, fwd_pos_array, rev_pos_array
 
 @jit(nopython=True)
-def get_events(signal, move):
+def get_events(signal, move, norm_type):
     stride, start, move_table=move
-    median=np.median(signal)
-    mad=np.median(np.abs(signal-median))
     
-    signal=(signal-median)/mad
+    if norm_type=='mad':
+        median=np.median(signal)
+        mad=np.median(np.abs(signal-median))
+        signal=(signal-median)/mad
+        
+    else:
+        mean=np.mean(signal)
+        std=np.std(signal)
+        signal=(signal-mean)/std
     
     signal[signal>5]=5
     signal[signal<-5]=-5
@@ -220,8 +226,8 @@ def get_pos(path):
     
     return labelled_pos_list
 
-def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name):
-    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label, ref_coordinates=ref_coordinates, read_name=read_name, ref_name=ref_name)
+def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name, window, norm_type):
+    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label, ref_coordinates=ref_coordinates, read_name=read_name, ref_name=ref_name, window=window, norm_type=norm_type)
                        
 def get_output(params, output_Q, process_event):
     output=params['output']
@@ -278,7 +284,7 @@ def get_output(params, output_Q, process_event):
                         print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
                         
                         
-                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name)
+                        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name, window=params['window'], norm_type=params['norm_type'])
 
                         chunk+=1
                         output_file_path=os.path.join(output,'%s.features.%d.npz' %(params['prefix'], chunk))
@@ -311,7 +317,7 @@ def get_output(params, output_Q, process_event):
         print('%s: Number of reads processed = %d.' %(str(datetime.datetime.now()), read_count), flush=True)
 
 
-        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name)
+        write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name, params['window'], params['norm_type'])
 
     return
 
@@ -320,7 +326,8 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
     
     window=params['window']
     window_range=np.arange(-window,window+1)
-    
+    norm_type=params['norm_type']
+                     
     div_threshold=params['div_threshold']
     cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':1, 'P':4, 'B':4}
     cigar_pattern = r'\d+[A-Za-z]'
@@ -392,7 +399,7 @@ def process(params, ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict,
             mean_qscore=-10*np.log10(np.mean(base_qual))
             base_qual=(1-base_qual)
             
-            mat=get_events(signal, move)
+            mat=get_events(signal, move, norm_type)
             
             if seq_type=='rna':
                 mat=np.flip(mat,axis=0)
@@ -606,6 +613,8 @@ if __name__ == '__main__':
     parser.add_argument("--motif", help='Motif for generating features followed by zero-based indices of nucleotides within the motif to generate features for. The motif and each index listed should be separated by whitespace, e.g. "--motif CGCG 0 2". Use either --pos_list or --motif to specify how to choose loci for feature generation, but not both. Features will be generated for all loci of the read that map to a reference sequence that matches the motif. Multiple indices can be specified but they should refer to the same nucleotide letter.  If you use --motif, it is assumed that all loci have the same modification label and you need to specify the label using --motif_label.', nargs='*')
     
     parser.add_argument("--motif_label", help='Modification label for the motif. 0 is for unmodified and 1 is for modified.',type=int, choices=[0,1])
+    
+    parser.add_argument("--norm_type", help='How to normalize read signal.',type=str, choices=['mad', 'standard'], default='mad')
         
     args = parser.parse_args()
     
@@ -621,7 +630,6 @@ if __name__ == '__main__':
         chrom_list=pysam.Samfile(args.bam).references
 
         
-     
     if args.motif and len(args.motif)>0:
         if args.pos_list is not None:
             print('Use either --motif or --pos_list but not both', flush=True)
@@ -631,12 +639,12 @@ if __name__ == '__main__':
             print('--motif_label should be specified with --motif option', flush=True)
             sys.exit(3)
         
-        motif_seq, exp_motif_seq, motif_ind, valid_motif=utils.motif_check(args.motif)
+        motif_seq, exp_motif_seq, motif_ind, valid_motif=motif_check(args.motif)
         if not valid_motif:
             sys.exit(3) 
             
     else:
-        motif=None
+        motif_seq=None
         motif_ind=None
         exp_motif_seq=None
         
@@ -650,7 +658,8 @@ if __name__ == '__main__':
             pos_list=args.pos_list, 
             ref=args.ref, 
             input=args.input,
-            motif_seq=motif,
+            norm_type=args.norm_type,
+            motif_seq=motif_seq,
             motif_ind=motif_ind,
             exp_motif_seq=exp_motif_seq,
             motif_label=args.motif_label,

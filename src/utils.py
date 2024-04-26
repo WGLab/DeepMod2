@@ -128,9 +128,9 @@ def get_model(params):
         print('Model: %s not found.' %params['model'], flush=True)
         sys.exit(2)
 
-def generate_batches(features, base_seq, ref_seq=None, batch_size=512):        
+def generate_batches(features, base_seq, window, ref_seq=None, batch_size=512):        
         if len(ref_seq)==0:
-            ref_seq=(4+torch.zeros(features.shape[0], 21)).type(torch.LongTensor)       
+            ref_seq=(4+torch.zeros(features.shape[0], 2*window+1)).type(torch.LongTensor)       
         else:
             ref_seq=torch.Tensor(ref_seq).type(torch.LongTensor)
             
