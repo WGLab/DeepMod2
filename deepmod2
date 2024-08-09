@@ -77,6 +77,7 @@ if __name__ == '__main__':
     
     merge_parser.add_argument("--input",   nargs='*', help= 'List of paths of per-read methylation calls to merge. File paths should be separated by space/whitespace. Use either --input or --list argument, but not both.')
     merge_parser.add_argument("--list",  help=  'A file containing paths to per-read methylation calls to merge (one per line). Use either --inputs or --list argument, but not both.', type=str)    
+    merge_parser.add_argument("--cpg_output",  help=  'Create an additional per-site output file with forward and negative strand counts for CpG sites combined.', default=False, action='store_true')
     
     if len(sys.argv)==1:
         parser.print_help()
@@ -118,7 +119,7 @@ if __name__ == '__main__':
         
         params={'output':args.output, 'prefix':args.prefix, 'qscore_cutoff':args.qscore_cutoff,
                 'length_cutoff':args.length_cutoff, 'mod_t':args.mod_t, 
-                'unmod_t':args.unmod_t,'include_non_cpg_ref':args.include_non_cpg_ref}
+                'unmod_t':args.unmod_t,'include_non_cpg_ref':args.include_non_cpg_ref, 'cpg_output':args.cpg_output}
         
         site_pred_file=utils.get_per_site(params, input_list)
         

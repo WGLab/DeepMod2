@@ -334,8 +334,7 @@ def get_stats_string(chrom, pos, strand, mod_call):
     
     return total_stats[0], mod_str
 
-
-def get_per_site(params, input_list):
+def get_cpg_output(params, input_list):    
     qscore_cutoff=params['qscore_cutoff']
     length_cutoff=params['length_cutoff']
     
@@ -344,7 +343,7 @@ def get_per_site(params, input_list):
     
     cpg_ref_only=not params['include_non_cpg_ref']
         
-    print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+    
     
     total_files=len(input_list)
     print('%s: Reading %d files.' %(str(datetime.datetime.now()), total_files), flush=True)
@@ -411,7 +410,7 @@ def get_per_site(params, input_list):
                 continue
             #fwd_stats=[self.chrom, self.position, self.position+1, '+', self.is_ref_cpg]+self.get_all_phases().forward.stats() + self.phase_1.forward.stats() + self.phase_2.forward.stats()
             
-            agg_stats, fwd_stats, rev_stats=get_stats_string(chrom, pos, is_ref_cpg, cpg)
+            agg_stats, fwd_stats, rev_stats=get_stats_string_cpg(chrom, pos, is_ref_cpg, cpg)
             if agg_stats[0]>0:
                 agg_per_site_file.write(agg_stats[1])
 
@@ -424,3 +423,80 @@ def get_per_site(params, input_list):
     print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
     print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
     print('%s: Aggregated Per Site Prediction file: %s' %(str(datetime.datetime.now()), agg_per_site_file_path), flush=True)
+
+def get_output(params, input_list):    
+    qscore_cutoff=params['qscore_cutoff']
+    length_cutoff=params['length_cutoff']
+    
+    mod_threshold=params['mod_t']
+    unmod_threshold=params['unmod_t']
+    
+    cpg_ref_only=not params['include_non_cpg_ref']
+        
+    
+    
+    total_files=len(input_list)
+    print('%s: Reading %d files.' %(str(datetime.datetime.now()), total_files), flush=True)
+    pbar = tqdm(total=total_files)
+
+    per_site_pred={}
+
+    for read_pred_file in input_list:
+        with open(read_pred_file,'r') as read_file:
+            read_file.readline()
+            for line in read_file:
+                read, chrom, pos, pos_after, read_pos, strand, score, mean_qscore, sequence_length, phase, is_ref_cpg = line.rstrip('\n').split('\t')
+
+                if pos=='NA' or float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
+                    continue
+
+                score=float(score)
+
+                if score<mod_threshold and score>unmod_threshold:
+                    continue
+                else:
+                    mod=score>=mod_threshold 
+
+                pos=int(pos)
+                phase=int(phase)
+
+                if (chrom, pos,strand) not in per_site_pred:
+                    per_site_pred[(chrom, pos,strand)]=[0]*6
+                
+                per_site_pred[(chrom, pos,strand)][2*phase+mod]+=1
+
+        pbar.update(1)
+    pbar.close()
+
+    print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)    
+    
+    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+                 'coverage','mod_coverage', 'unmod_coverage','mod_fraction',
+                 'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_fraction_phase1',
+                 'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_fraction_phase2']
+    per_site_header='\t'.join(per_site_fields)+'\n'
+    
+    per_site_file_path=os.path.join(params['output'],'%s.per_site' %params['prefix'])
+        
+    with open(per_site_file_path, 'w') as per_site_file:
+        per_site_file.write(per_site_header)
+
+        for x in sorted(per_site_pred.keys()):          
+            chrom, pos, strand=x
+            mod_call=per_site_pred[x]
+
+            stats=get_stats_string(chrom, pos, strand, mod_call)
+            if stats[0]>0:
+                per_site_file.write(stats[1])
+    
+    print('%s: Finished Writing Per Site Methylation Output.' %str(datetime.datetime.now()), flush=True)
+    print('%s: Per Site Prediction file: %s' %(str(datetime.datetime.now()), per_site_file_path), flush=True)
+    
+def get_per_site(params, input_list):
+    print('%s: Starting Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)
+    
+    if params['cpg_output']:    
+        get_cpg_output(params, input_list)
+    else:
+        get_output(params, input_list)
+
