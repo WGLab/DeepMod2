@@ -445,7 +445,7 @@ def get_output(params, input_list):
         with open(read_pred_file,'r') as read_file:
             read_file.readline()
             for line in read_file:
-                read, chrom, pos, pos_after, read_pos, strand, score, mean_qscore, sequence_length, phase, is_ref_cpg = line.rstrip('\n').split('\t')
+                read, chrom, pos, pos_after, read_pos, strand, score, mean_qscore, sequence_length, phase = line.rstrip('\n').split('\t')
 
                 if pos=='NA' or float(mean_qscore)<qscore_cutoff or int(sequence_length)<length_cutoff:
                     continue
@@ -470,7 +470,7 @@ def get_output(params, input_list):
 
     print('%s: Writing Per Site Methylation Detection.' %str(datetime.datetime.now()), flush=True)    
     
-    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+    per_site_fields=['#chromosome', 'position_before', 'position','strand',
                  'coverage','mod_coverage', 'unmod_coverage','mod_fraction',
                  'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_fraction_phase1',
                  'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_fraction_phase2']

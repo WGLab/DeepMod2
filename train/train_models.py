@@ -239,8 +239,6 @@ def train(training_dataset, validation_dataset, validation_type, validation_frac
         pos_weight=torch.Tensor(np.array(float(model_config['weights'])))
 
     print('Number of Modified Instances={}\nNumber of Un-Modified Instances={}\nPositive Label Weight={}\n'.format(weight_counts[1],weight_counts[0],pos_weight), flush=True)
-
-    model_dims=(21,10)
     
     if model_type=='bilstm':
         net = BiLSTM(model_dims=model_config['model_dims'], num_layers=model_config['num_layers'], \
@@ -287,7 +285,7 @@ def train(training_dataset, validation_dataset, validation_type, validation_frac
     else:
         list_of_evals=['Normal']
     
-    dummy_ref_seq=(4+torch.zeros(batch_size, 21)).type(torch.LongTensor).to(dev)
+    dummy_ref_seq=(4+torch.zeros(batch_size, model_config["model_dims"][0])).type(torch.LongTensor).to(dev)
     
     with open(log_file_path,'w') as log_file:
         log_file.write(args_str)
@@ -360,7 +358,9 @@ def train(training_dataset, validation_dataset, validation_type, validation_frac
                     train_str, test_str)
             print(epoch_log, flush=True)
             log_file.write(epoch_log)
-            
+            log_file.flush()
+            os.fsync(log_file.fileno())
+
             model_path=os.path.join(model_save_path, 'model.epoch%d.%.4f' %(j+1, total_test_acc))
             torch.save({
             'epoch': j+1,
@@ -423,20 +423,22 @@ if __name__=='__main__':
     validation_type=args.validation_type
     validation_fraction=args.validation_fraction
 
-    valid_data, window, norm_type = check_training_files(mixed_training_dataset, can_training_dataset,\
+    valid_data, window, norm_type, strides_per_base, model_depth = check_training_files(mixed_training_dataset, can_training_dataset,\
                                            mod_training_dataset, validation_dataset)
     
     if not valid_data:
         sys.exit(3)
-
-    model_config = dict(model_dims=(2*window+1,10),window=window, model_type=args.model_type,
+    
+    model_len=strides_per_base*(2*window+1)#2*window+1
+    
+    model_config = dict(model_dims=(model_len,model_depth+1),window=window, model_type=args.model_type,
     num_layers=args.num_layers, dim_feedforward=args.dim_feedforward,
     num_fc=args.num_fc, embedding_dim=args.embedding_dim,
     embedding_type=args.embedding_type, include_ref=args.include_ref,
     pe_dim=args.pe_dim, nhead=args.nhead, pe_type=args.pe_type,
     l2_coef=args.l2_coef, lr=args.lr, model_save_path=args.model_save_path, fc_type=args.fc_type,
     train_w_wo_ref=args.train_w_wo_ref, weights=args.weights, norm_type=norm_type)
-
+    
     args_dict=vars(args)
     args_str=''.join('%s: %s\n' %(k,str(v)) for k,v in args_dict.items())
     print(args_str, flush=True)
@@ -444,7 +446,7 @@ if __name__=='__main__':
     seed =random.randint(0, 0xffff_ffff_ffff_ffff) if args.seed is None else int(args.seed)
     
     training_dataset = [mixed_training_dataset, can_training_dataset, mod_training_dataset]
-    
+
     with open(os.path.join(args.model_save_path,'args'),'w') as file:
         file.write('Command: python %s\n\n\n' %(' '.join(sys.argv)))
         file.write('------Parameters Used For Running DeepMod2------\n')

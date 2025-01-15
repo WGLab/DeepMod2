@@ -22,13 +22,58 @@ import pod5 as p5
 import torch
 
 @jit(nopython=True)
-def get_events(signal, move):
+def get_segment_events(signal, move, norm_type):
     stride, start, move_table=move
-    median=np.median(signal)
-    mad=np.median(np.abs(signal-median))
+
+    if norm_type=='mad':
+        median=np.median(signal)
+        mad=np.median(np.abs(signal-median))
+        signal=(signal-median)/mad
+
+    else:
+        mean=np.mean(signal)
+        std=np.std(signal)
+        signal=(signal-mean)/std
+
+    signal[signal>5]=5
+    signal[signal<-5]=-5
+
+    move_len=len(move_table)
+
+    data=np.zeros((move_len,stride+2))
+    indexes=np.full(move_len,fill_value=0,dtype=np.int32)
+    z=1
+    idx=-1
     
-    signal=(signal-median)/mad
+    segments=np.full(np.sum(move_table),fill_value=0,dtype=np.int32)
     
+    for i in range(move_len):
+        if move_table[i]:
+            z=z^1
+            idx+=1
+            segments[idx]=i
+        
+        data[i,z]=1
+        indexes[i]=idx
+        for k in range(stride):
+            data[i,2+k]=signal[start+i*stride+k]
+    
+    return data, indexes, segments
+
+@jit(nopython=True)
+def get_events(signal, move, norm_type):
+    stride, start, move_table=move
+    
+    if norm_type=='mad':
+        median=np.median(signal)
+        mad=np.median(np.abs(signal-median))
+        signal=(signal-median)/mad
+
+    else:
+        mean=np.mean(signal)
+        std=np.std(signal)
+        signal=(signal-mean)/std
+            
     move_len=len(move_table)
     move_index=np.where(move_table)[0]
     rlen=len(move_index)
@@ -377,7 +422,7 @@ def get_output(params, output_Q, methylation_event, header_dict, ref_pos_dict):
     
     if skip_per_site:
         return 
-    per_site_fields=['#chromosome', 'position_before', 'position','strand', 'ref_cpg',
+    per_site_fields=['#chromosome', 'position_before', 'position','strand',
                  'coverage','mod_coverage', 'unmod_coverage','mod_fraction',
                  'coverage_phase1','mod_coverage_phase1', 'unmod_coverage_phase1','mod_fraction_phase1',
                  'coverage_phase2','mod_coverage_phase2', 'unmod_coverage_phase2','mod_fraction_phase2']
@@ -428,9 +473,13 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     
     model, model_config=get_model(params)
     window=model_config['window']
+    full_signal=model_config['full_signal']
+    strides_per_base=model_config['strides_per_base']
+    norm_type=model_config['norm_type']
     
     model.eval()
     model.to(dev);
+    print('CUDA test:', torch.cuda.is_available(), next(model.parameters()).is_cuda, flush=True)
     
     reads_per_round=100
     
@@ -446,7 +495,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     total_ref_seq_list=[]
     r_count=0
     
-    dummy_ref_seq=4+np.zeros(2*window+1)
+    dummy_ref_seq=4+np.zeros(1000000)
     
     ref_available=True if params['ref'] else False
     
@@ -485,8 +534,8 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
 
                 pos_list_c, pos_list_candidates, read_to_ref_pairs=get_candidates(fq, align_data, aligned_pairs, ref_pos_dict, exp_motif_seq, motif_base, motif_ind, position_based)
 
-                pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window)\
-                                                        &(pos_list_candidates[:,0]<sequence_length-window-1)] if len(pos_list_candidates)>0 else pos_list_candidates
+                pos_list_candidates=pos_list_candidates[(pos_list_candidates[:,0]>window*strides_per_base)\
+                                                        &(pos_list_candidates[:,0]<sequence_length-(window+1)*strides_per_base)] if len(pos_list_candidates)>0 else pos_list_candidates
 
                 if len(pos_list_candidates)==0:
                     total_unprocessed_reads.append(read_dict)
@@ -514,14 +563,24 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
 
                 if is_mapped and ref_available and not params['exclude_ref_features']:
                     ref_seq=ref_seq_dict[ref_name][:,1][read_to_ref_pairs[:, 1]][::-1] if reverse else ref_seq_dict[ref_name][:,0][read_to_ref_pairs[:, 1]]
-                    per_site_ref_seq=np.array([ref_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                    
                 else:
-                    per_site_ref_seq=np.array([dummy_ref_seq for candidate in pos_list_candidates])
-
-                mat=get_events(signal, move)
-                if seq_type=='rna':
-                    mat=np.flip(mat,axis=0)
-                mat=np.hstack((mat, base_qual))
+                    ref_seq=dummy_ref_seq
+                    
+                
+                if full_signal:
+                    mat, indexes, segments=get_segment_events(signal, move, norm_type)
+                    segments_ends=np.concatenate([segments[1:],np.array([len(move_table)])])
+                    segment_ranges=np.vstack([segments, segments_ends]).T
+                    if seq_type=='rna':
+                        mat=np.flip(mat,axis=0)
+                        indexes=len(read_dict['seq'])-np.flip(indexes,axis=0)-1    
+                        segment_ranges=np.flip(np.flip(len(move_table)-segment_ranges,axis=1),axis=0)
+                else:
+                    mat=get_events(signal, move, norm_type)
+                    if seq_type=='rna':
+                        mat=np.flip(mat,axis=0)
+                    mat=np.hstack((mat, base_qual))
 
                 try:
                     c_idx=[True if x in pos_list_c else False for x in pos_list_candidates[:,0]]
@@ -534,10 +593,26 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
                 except ValueError:
                     total_c_idx.append([])
                     total_MM_list.append(None)
-
-                per_site_features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
-                per_site_base_seq=np.array([base_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
-
+                    
+                    
+                if full_signal:
+                    base_seq_full=base_seq[indexes]
+                    ref_seq_full=ref_seq[indexes]
+                    base_qual_full=base_qual[indexes]
+                    per_site_features=np.array([mat[segment_ranges[candidate[0]][0]-strides_per_base*window:segment_ranges[candidate[0]][0]+strides_per_base*(window+1)] for candidate in pos_list_candidates])
+                    per_site_base_qual=np.array([base_qual_full[segment_ranges[candidate[0]][0]-strides_per_base*window:segment_ranges[candidate[0]][0]+strides_per_base*(window+1)] for candidate in pos_list_candidates])
+                    per_site_indexes=np.array([(indexes==candidate[0])[segment_ranges[candidate[0]][0]-strides_per_base*window:segment_ranges[candidate[0]][0]+strides_per_base*(window+1)] for candidate in pos_list_candidates])
+                    per_site_features=np.dstack([per_site_features, per_site_indexes[:,:,np.newaxis], per_site_base_qual])
+                    
+                    per_site_base_seq=np.array([base_seq_full[segment_ranges[candidate[0]][0]-strides_per_base*window:segment_ranges[candidate[0]][0]+strides_per_base*(window+1)] for candidate in pos_list_candidates])
+                    per_site_ref_seq=np.array([ref_seq_full[segment_ranges[candidate[0]][0]-strides_per_base*window:segment_ranges[candidate[0]][0]+strides_per_base*(window+1)] for candidate in pos_list_candidates])
+                    
+                    
+                else:
+                    per_site_features=np.array([mat[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                    per_site_base_seq=np.array([base_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                    per_site_ref_seq=np.array([ref_seq[candidate[0]-window: candidate[0]+window+1] for candidate in pos_list_candidates])
+                
                 total_candidate_list.append(pos_list_candidates)
                 total_feature_list.append(per_site_features)
                 total_base_seq_list.append(per_site_base_seq)
@@ -609,6 +684,8 @@ def get_input(params, signal_Q, output_Q, input_event):
     non_primary_reads=[]
     reads_per_chunk=100
     
+    max_qsize=1000 if params['seq_type']=='rna' else 200
+    
     if params['file_type']=='fast5':
         guppy_group=params['guppy_group']
         for filename in signal_files:
@@ -663,7 +740,7 @@ def get_input(params, signal_Q, output_Q, input_event):
         for filename in signal_files:
             with p5.Reader(filename) as reader:
                 for read in reader.reads():
-                    if signal_Q.qsize()>200:
+                    if signal_Q.qsize()>max_qsize:
                         time.sleep(20)
                         print('Pausing input due to INPUT queue size limit. Signal_qsize=%d' %(signal_Q.qsize()), flush=True)
                         
@@ -779,7 +856,7 @@ def call_manager(params):
         handlers.append(p);    
     
     input_process.join()
-    print('%s:Reading inputs complete.' %str(datetime.datetime.now()), flush=True)   
+    print('%s: Reading inputs complete.' %str(datetime.datetime.now()), flush=True)   
 
     for job in handlers:
         job.join()
