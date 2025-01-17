@@ -128,10 +128,10 @@ We will use `generate_features.py` module under `train` folder of DeepMod2 repos
 
 ```
 #generate features for modified sample
-python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/mod.bam --input  ${INPUT_DIR}/data_download/signal_files/mod.pod5 --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/mod/ --pos_list  ${INPUT_DIR}/data_download/label_files/mod_list  --window 10
+python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/mod.bam --input  ${INPUT_DIR}/data_download/signal_files/mod.pod5 --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/mod/ --pos_list  ${INPUT_DIR}/data_download/label_files/mod_list  --window 10 --seq_type dna
 
 #generate features for unmodified sample
-python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/unmod.bam --input  ${INPUT_DIR}/data_download/signal_files/unmod.pod5 --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/unmod/ --pos_list  ${INPUT_DIR}/data_download/label_files/unmod_list  --window 10
+python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/unmod.bam --input  ${INPUT_DIR}/data_download/signal_files/unmod.pod5 --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/unmod/ --pos_list  ${INPUT_DIR}/data_download/label_files/unmod_list  --window 10 --seq_type dna
 ```
 
 This will allow us to create modified sample features under `${OUTPUT_DIR}/features/mod/` directory, and unmodified sample features under `${OUTPUT_DIR}/features/unmod/`. We will supply these two folders to model training module.
@@ -154,7 +154,7 @@ We will provide the modified base features using `--mod_training_dataset` parame
 
 ```
 #train model using modified and canonical base samples
-python ${DeepMod2_DIR}/train/train_models.py --can_training_dataset ${OUTPUT_DIR}/features/unmod/ --mod_training_dataset ${OUTPUT_DIR}/features/mod/ --validation_type split --validation_fraction 0.5 --model_save_path ${OUTPUT_DIR}/can_mod_bilstm/ --epochs 10 --batch_size 128 --model_type bilstm --num_layers 2 --num_fc 32 --dim_feedforward 32 --lr 0.01 --window 10 --include_ref --l2_coef 0.01 --seed 0
+python ${DeepMod2_DIR}/train/train_models.py --can_training_dataset ${OUTPUT_DIR}/features/unmod/ --mod_training_dataset ${OUTPUT_DIR}/features/mod/ --validation_type split --validation_fraction 0.5 --model_save_path ${OUTPUT_DIR}/can_mod_bilstm/ --epochs 10 --batch_size 128 --model_type bilstm --num_layers 2 --num_fc 32 --dim_feedforward 32 --lr 0.01 --include_ref --l2_coef 0.01 --seed 0
 ```
 
 This example uses a split of training dataset for validation, but you can generate features for a different genome or sample or chromosome using `generate_features.py`, and provide those features for validation by specifying validation type and a path to the validation dataset as follows `--validation_type dataset --validation_dataset path_to_validation_features`.
@@ -476,9 +476,6 @@ git clone https://github.com/WGLab/DeepMod2.git ${DeepMod2_DIR}
 conda env create -f ${DeepMod2_DIR}/environment.yml
 conda activate deepmod2
 conda install samtools -y
-
-#switch to "general_motif" branch that currently has this experimental functionality
-git -C ${DeepMod2_DIR} checkout general_motif
 ```
 
 The above commands also install a generic version of PyTorch library for deep learning. If you want to use GPU for model training, make sure to install CUDA enabled version of Pytorch that is compatible with your GPU driver: https://pytorch.org/get-started/locally/.
@@ -535,7 +532,7 @@ We will use `generate_features.py` module under `train` folder of DeepMod2 repos
 
 ```
 #generate features for modified sample
-python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/all_reads.bam --input  ${INPUT_DIR}/data_download/signal_files/ --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/mixed/ --pos_list  ${INPUT_DIR}/data_download/label_files/mixed_list  --window 10
+python ${DeepMod2_DIR}/train/generate_features.py --bam ${INPUT_DIR}/bam_files/all_reads.bam --input  ${INPUT_DIR}/data_download/signal_files/ --ref ${INPUT_DIR}/GRCh38.fa --file_type pod5 --threads 4 --output ${OUTPUT_DIR}/features/mixed/ --pos_list  ${INPUT_DIR}/data_download/label_files/mixed_list  --window 10 --seq_type dna
 ```
 
 This will allow us to create features under `${OUTPUT_DIR}/features/mixed/` directory that contains both modified and unmodified instances. We will supply this folder to model training module.
@@ -558,7 +555,7 @@ We will provide the training features using `--mixed_training_dataset` parameter
 
 ```
 #train model using mixed sample containinf modified and canonical instances
-python ${DeepMod2_DIR}/train/train_models.py --mixed_training_dataset ${OUTPUT_DIR}/features/mixed/ --validation_type split --validation_fraction 0.5 --model_save_path ${OUTPUT_DIR}/mixed_bilstm/ --epochs 10 --batch_size 128 --model_type bilstm --num_layers 2 --num_fc 32 --dim_feedforward 32 --lr 0.01 --window 10 --include_ref --l2_coef 0.01 --seed 0
+python ${DeepMod2_DIR}/train/train_models.py --mixed_training_dataset ${OUTPUT_DIR}/features/mixed/ --validation_type split --validation_fraction 0.5 --model_save_path ${OUTPUT_DIR}/mixed_bilstm/ --epochs 10 --batch_size 128 --model_type bilstm --num_layers 2 --num_fc 32 --dim_feedforward 32 --lr 0.01 --include_ref --l2_coef 0.01 --seed 0
 ```
 
 This example uses a split of training dataset for validation, but you can generate features for a different genome or sample or chromosome using `generate_features.py`, and provide those features for validation by specifying validation type and a path to the validation dataset as follows `--validation_type dataset --validation_dataset path_to_validation_features`.
