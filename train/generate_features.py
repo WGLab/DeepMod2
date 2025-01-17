@@ -227,7 +227,7 @@ def get_pos(path):
     return labelled_pos_list
 
 def write_to_npz(output_file_path, mat, base_qual, base_seq, ref_seq, label, ref_coordinates, read_name, ref_name, window, norm_type):
-    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label, ref_coordinates=ref_coordinates, read_name=read_name, ref_name=ref_name, window=window, norm_type=norm_type)
+    np.savez(output_file_path, mat=mat, base_qual=base_qual, base_seq=base_seq, ref_seq=ref_seq, label=label, ref_coordinates=ref_coordinates, read_name=read_name, ref_name=ref_name, window=window, norm_type=norm_type, strides_per_base=1, model_depth=mat.shape[2], full_signal=False)
                        
 def get_output(params, output_Q, process_event):
     output=params['output']

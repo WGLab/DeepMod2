@@ -423,7 +423,7 @@ if __name__=='__main__':
     validation_type=args.validation_type
     validation_fraction=args.validation_fraction
 
-    valid_data, window, norm_type, strides_per_base, model_depth = check_training_files(mixed_training_dataset, can_training_dataset,\
+    valid_data, window, norm_type, strides_per_base, model_depth, full_signal = check_training_files(mixed_training_dataset, can_training_dataset,\
                                            mod_training_dataset, validation_dataset)
     
     if not valid_data:
@@ -437,7 +437,7 @@ if __name__=='__main__':
     embedding_type=args.embedding_type, include_ref=args.include_ref,
     pe_dim=args.pe_dim, nhead=args.nhead, pe_type=args.pe_type,
     l2_coef=args.l2_coef, lr=args.lr, model_save_path=args.model_save_path, fc_type=args.fc_type,
-    train_w_wo_ref=args.train_w_wo_ref, weights=args.weights, norm_type=norm_type)
+    train_w_wo_ref=args.train_w_wo_ref, weights=args.weights, norm_type=norm_type, full_signal=full_signal, strides_per_base=strides_per_base)
     
     args_dict=vars(args)
     args_str=''.join('%s: %s\n' %(k,str(v)) for k,v in args_dict.items())

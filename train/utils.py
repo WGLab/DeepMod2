@@ -64,8 +64,10 @@ def check_training_files(mixed_training_dataset, can_training_dataset,\
     
     model_depth=[int(np.load(file)['model_depth']) for file in itertools.chain.from_iterable([mixed_training_dataset, can_training_dataset,\
                                                mod_training_dataset, validation_dataset])]
-    if len(set(window))==1 and len(set(norm_type))==1 and len(set(strides_per_base))==1:
-        return True, window[0], norm_type[0], strides_per_base[0], model_depth[0]
+    full_signal=np.unique([np.load(file)['full_signal'] for file in itertools.chain.from_iterable([mixed_training_dataset, can_training_dataset, mod_training_dataset, validation_dataset])])
+    
+    if len(set(window))==1 and len(set(norm_type))==1 and len(set(strides_per_base))==1 and len(full_signal)==1:
+        return True, window[0], norm_type[0], strides_per_base[0], model_depth[0], full_signal[0]
     
     elif len(set(window))>1:
         print('Inconsistent dataset with multiple window sizes')
@@ -76,7 +78,7 @@ def check_training_files(mixed_training_dataset, can_training_dataset,\
     elif len(set(strides_per_base))>1:
         print('Inconsistent dataset with multiple strides_per_base')
         
-    return False, window, norm_type, strides_per_base, model_depth
+    return False, window, norm_type, strides_per_base, model_depth, full_signal
 
 def generate_batches(files, validation_type, validation_fraction, data_type, batch_size=512):
     counter = 0
