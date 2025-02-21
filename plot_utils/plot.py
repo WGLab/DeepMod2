@@ -131,7 +131,7 @@ def plot_single_sample(data, line_plot=False, color='green',lim=0, marker_size=1
     
     plt.show()
     
-def plot_two_samples(sample1_data, sample2_data, label1='Mod', label2='Unmod', line_plot=False, lim=0, marker_size=10, marker_transparency=0.2, display_average=True, average_type='median', save_path=None):
+def plot_two_samples(sample1_data, sample2_data, label1='Mod', label2='Unmod', line_plot=False, lim=0, marker_size=10, marker_transparency=0.2, display_average=True, average_type='median', save_path=None, color1='green', color2='red'):
 
     plt.figure(figsize=(12, 3),dpi=100)
     
@@ -160,9 +160,9 @@ def plot_two_samples(sample1_data, sample2_data, label1='Mod', label2='Unmod', l
 
         
         if line_plot:
-            plt.plot(p_x_axis, p_y_axis, linewidth=0.5, alpha=0.5, color='green')
+            plt.plot(p_x_axis, p_y_axis, linewidth=0.5, alpha=0.5, color=color1)
 
-        plt.scatter(p_x_axis, p_y_axis, alpha=marker_transparency, s=marker_size, color='green', edgecolor=None)
+        plt.scatter(p_x_axis, p_y_axis, alpha=marker_transparency, s=marker_size, color=color1, edgecolor=None)
         
     for read_data in sample2_data.values():
         for i in range(K):
@@ -173,9 +173,9 @@ def plot_two_samples(sample1_data, sample2_data, label1='Mod', label2='Unmod', l
 
         
         if line_plot:
-            plt.plot(p_x_axis, p_y_axis, linewidth=0.5, alpha=0.5, color='red')
+            plt.plot(p_x_axis, p_y_axis, linewidth=0.5, alpha=0.5, color=color2)
 
-        plt.scatter(p_x_axis, p_y_axis, alpha=marker_transparency, s=marker_size, color='red', edgecolor=None)
+        plt.scatter(p_x_axis, p_y_axis, alpha=marker_transparency, s=marker_size, color=color2, edgecolor=None)
     
     plt.axhline(y=0, linestyle='dotted')
     for i in range(K):
@@ -185,15 +185,15 @@ def plot_two_samples(sample1_data, sample2_data, label1='Mod', label2='Unmod', l
     if display_average:
         for i in range(0,K):
             if average_type=='mean':
-                plt.hlines(y=np.mean(sample_1_bin_list[i]),xmin=i,xmax=i+1,color='green',linestyle='-')
-                plt.hlines(y=np.mean(sample_2_bin_list[i]),xmin=i,xmax=i+1,color='red',linestyle='-')
+                plt.hlines(y=np.mean(sample_1_bin_list[i]),xmin=i,xmax=i+1,color=color1,linestyle='-')
+                plt.hlines(y=np.mean(sample_2_bin_list[i]),xmin=i,xmax=i+1,color=color2,linestyle='-')
             
             elif average_type=='median':
-                plt.hlines(y=np.median(sample_1_bin_list[i]),xmin=i,xmax=i+1,color='green',linestyle='-')
-                plt.hlines(y=np.median(sample_2_bin_list[i]),xmin=i,xmax=i+1,color='red',linestyle='-')
+                plt.hlines(y=np.median(sample_1_bin_list[i]),xmin=i,xmax=i+1,color=color1,linestyle='-')
+                plt.hlines(y=np.median(sample_2_bin_list[i]),xmin=i,xmax=i+1,color=color2,linestyle='-')
                 
-        handles.append(mpatches.Patch(color='green', label='{} {} Signal'.format(label1, average_type.capitalize())))
-        handles.append(mpatches.Patch(color='red', label='{} {} Signal'.format(label2, average_type.capitalize())))
+        handles.append(mpatches.Patch(color=color1, label='{} {} Signal'.format(label1, average_type.capitalize())))
+        handles.append(mpatches.Patch(color=color2, label='{} {} Signal'.format(label2, average_type.capitalize())))
 
     plt.axis([0, K, 1.1*l_lim, 1.1*u_lim])
     plt.xticks(np.arange(0, K) + 1/2, cons_seq)
