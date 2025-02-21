@@ -60,6 +60,8 @@ For a detailed usage guide for signal plotting and comparison, refer to the Jupy
 The following models for 5mC detection in CpG motif are provided in the repository. Use `--model MODEL_NAME` to specify a model to use. You only need to provide the name of the model, not the path to it. Each model is compatible with a different Dorado or Guppy basecalling model version.
 |Model Architecture|DeepMod2 Model Name|Flowcell<BR>(Sampling Rate)| Compatible Dorado/Guppy Basecalling Model|
 |-|-|-|-|
+|BiLSTM|**bilstm_r10.4.1_5khz_v5.0**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v5.0.0**
+|Transformer|**transformer_r10.4.1_5khz_v5.0**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v5.0.0**
 |BiLSTM|**bilstm_r10.4.1_5khz_v4.3**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.3.0**
 |Transformer|**transformer_r10.4.1_5khz_v4.3**|R10.4.1 (5kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.3.0**
 |BiLSTM|**bilstm_r10.4.1_4khz_v4.1**|R10.4.1 (4kHz)|**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup)@v4.1.0** in Dorado<BR>**dna_r10.4.1_e8.2_400bps_(fast\|hac\|sup).cfg** in Guppy 6.5.7|

@@ -27,6 +27,10 @@ model_dict={
                               'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
                               'model_config_path':'models/bilstm.cfg'},
     
+    'bilstm_r10.4.1_5khz_v5.0': {  'path' : 'models/bilstm/R10.4.1_5kHz_v5.0',
+                              'help': 'BiLSTM model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v5.0 Guppy/Dorado basecaller model.',
+                              'model_config_path':'models/bilstm.cfg'},
+    
     
     'transformer_r9.4.1' : {  'path' : 'models/transformer/R9.4.1',
                               'help':'Transformer model trained on chr2-21 of HG002, HG003 and HG004 R9.4.1 flowcells.',
@@ -42,6 +46,10 @@ model_dict={
     
         'transformer_r10.4.1_5khz_v4.3': { 'path' : 'models/transformer/R10.4.1_5kHz_v4.3',
                                   'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v4.3 Guppy/Dorado basecaller model.',
+                                  'model_config_path':'models/transformer.cfg'}, 
+    
+    'transformer_r10.4.1_5khz_v5.0': { 'path' : 'models/transformer/R10.4.1_5kHz_v5.0',
+                                  'help': 'Transfromer model trained on chr2-21 of HG002, HG003 and HG004 R10.4.1 flowcells with 5kHz sampling, with basecalling performed by v5.0 Guppy/Dorado basecaller model.',
                                   'model_config_path':'models/transformer.cfg'}, 
 }
 
