@@ -469,7 +469,7 @@ def process(params,ref_pos_dict, signal_Q, output_Q, input_event, ref_seq_dict):
     base_map={'A':0, 'C':1, 'G':2, 'T':3, 'U':3}
     
     cigar_map={'M':0, '=':0, 'X':0, 'D':1, 'I':2, 'S':2,'H':2, 'N':1, 'P':4, 'B':4}
-    cigar_pattern = r'\d+[A-Za-z]'
+    cigar_pattern = r'\d+[A-Za-z=]'
     
     model, model_config=get_model(params)
     window=model_config['window']
